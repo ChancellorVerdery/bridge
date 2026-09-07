@@ -10,17 +10,24 @@ import Foundation
 //
 // THE SHAPE
 //
-//   * THE PROJECT IS THE UNIT OF ISOLATION. Each project holds a full set of
-//     agent CLONES. `frontend-design` in Bridge and `frontend-design` in
-//     CalcNotes are two separate sessions under two separate keys, alive at the
-//     same time, sharing nothing.
+//   * THE PROJECT IS THE UNIT OF ISOLATION, and CHANCELLOR DECIDES WHO IS IN
+//     ONE. Each project carries an ACCESS LIST — the agents he has allowed in —
+//     and a set of launched CLONES drawn from it. `frontend-design` in Bridge
+//     and `frontend-design` in CalcNotes are two separate sessions under two
+//     separate keys, alive at the same time, sharing no transcript.
+//
+//     A project does NOT hold a clone of every agent. That was the previous
+//     pass's assumption and it was wrong: his own preference document rostered
+//     seven agents in Bridge and one in Atlas. Access is his; launching brings
+//     a clone into being; and after a task he either kills the clone or leaves
+//     it idle. See `launch`, `setIdle` and `kill` below.
 //
 //         agent:<agentId>:bridge:<projectId>
 //
 //     `chat.send` to a key that does not exist CREATES it (verified on the live
 //     gateway — see PROTOCOL.md §11.1), so cloning needs no provisioning step
-//     and none is attempted. Creating a project is therefore exactly: write the
-//     roster, and let the first delivered turn bring each clone into being.
+//     and none is attempted. Launching a clone is therefore exactly: record it,
+//     and let the first delivered turn bring the session into being.
 //
 //   * ONE TRANSCRIPT PER PROJECT, owned here, holding every turn in that
 //     project regardless of who it was addressed to. Pings decide who takes a
@@ -33,29 +40,41 @@ import Foundation
 //     the sidebar: a room belongs to a project now.
 //
 //   * AN AGENT CAN ONLY REACH AGENTS INSIDE ITS OWN PROJECT. `deliver` refuses
-//     a target that is not in that project's roster, and a ping is resolved
-//     against the roster of the project the ping was said in — never against
-//     the gateway's whole agent list. There is no cross-project messaging and
-//     no way to ask for one.
+//     a target that is not in that project's ACCESS LIST, and a ping is resolved
+//     against the access list of the project the ping was said in — never
+//     against the gateway's whole agent list. There is no cross-project
+//     messaging and no way to ask for one.
 //
 //   * Bridge relays. The AGENTS DO NOT. Nothing in a lane calls a session tool.
 //
-// MEMORY: PRIVATE PER CLONE, ONE FILE SHARED BY ALL OF THEM
+// MEMORY AND IDENTITY ARE PER AGENT TYPE, NOT PER PROJECT
 //
-// Each clone gets its own memory file, scoped to (project, agent):
+// Every clone of the same agent writes the SAME two files, wherever it is
+// running:
 //
-//     ~/.openclaw/workspace/memory/bridge/<projectId>/<agentId>.md
+//     ~/.openclaw/workspace/memory/bridge/<agentId>/SOUL.md
+//     ~/.openclaw/workspace/memory/bridge/<agentId>/MEMORY.md
 //
-// and every clone in every project also reads and appends to ONE common file:
+// `frontend-design` in Bridge and `frontend-design` in CalcNotes are separate
+// SESSIONS with separate transcripts, and they are the same AGENT: one identity,
+// one accumulated memory, read and appended by both. A lane that learned
+// something in one project knows it in the next.
+//
+// This is the correction that defines v3. The previous pass gave each clone a
+// file scoped to (project, agent) — a private memory per project — which made
+// the same agent nine strangers who happened to share a name, and meant nothing
+// any of them learned survived being asked to work somewhere else. Isolation is
+// about TRANSCRIPT AND REACH. It was never meant to be about identity.
+//
+// A third file stays as it was, and is deliberately common to everyone:
 //
 //     ~/.openclaw/workspace/memory/bridge/SHARED.md
 //
-// The shared file is deliberate. Chancellor wants a lane working in one project
-// to know the other projects exist and what is happening in them; isolation is
-// about state and reach, not about ignorance. Bridge does not own the contents
-// of either file — the agents read and append with their own file tools, on the
-// gateway host where they actually run. All this file does is name the paths in
-// the standing preamble, which is the only place a clone could learn them.
+// read and appended by every agent in every project, so a lane knows the other
+// projects exist. Bridge does not own the contents of any of these — the agents
+// read and append with their own file tools, on the gateway host where they
+// actually run. All this file does is name the paths in the standing preamble,
+// which is the only place a clone could learn them.
 //
 // WHY BRIDGE RELAYS RATHER THAN THE AGENTS
 //
@@ -139,9 +158,9 @@ final class Room {
 
     private(set) var store: Store
 
-    /// The real agent roster, from `agents.list`. This is the set of agent
-    /// DEFINITIONS the gateway knows; a project's roster is drawn from it, and
-    /// a ping is resolved against the PROJECT's roster rather than this.
+    /// Every agent the gateway defines, from `agents.list`. This is the menu
+    /// Chancellor picks a project's access list FROM; it is never the access
+    /// list itself, and a ping is resolved against the project's, not this.
     private(set) var agents: [(id: String, name: String)] = []
 
     /// The projects, mirrored from Prefs so routing can answer "is this target
@@ -166,15 +185,18 @@ final class Room {
     /// integer buys nothing and is an error under the Swift 6 language mode.
     nonisolated static let storeVersion = 2
 
-    /// Where a clone's memory lives, on the gateway host where the agents run.
-    /// Bridge is on the Mac and never touches these files; it only tells each
-    /// clone the two paths, because the preamble is the only channel through
-    /// which a clone could learn them.
+    /// Where an agent's identity and memory live, on the gateway host where the
+    /// agents run. Bridge is on the Mac and never touches these files; it only
+    /// tells each clone the paths, because the preamble is the only channel
+    /// through which a clone could learn them.
+    ///
+    /// KEYED BY AGENT, NOT BY (PROJECT, AGENT). Every clone of an agent gets the
+    /// same two paths in every project, which is what makes them one agent with
+    /// one memory rather than a name shared by strangers.
     static let memoryRoot = "~/.openclaw/workspace/memory/bridge"
     static var sharedMemoryPath: String { "\(memoryRoot)/SHARED.md" }
-    static func memoryPath(project: String, agent: String) -> String {
-        "\(memoryRoot)/\(project)/\(agent).md"
-    }
+    static func soulPath(agent: String) -> String { "\(memoryRoot)/\(agent)/SOUL.md" }
+    static func memoryPath(agent: String) -> String { "\(memoryRoot)/\(agent)/MEMORY.md" }
 
     /// Per project, so one project's runaway chain cannot pause another.
     private var relayTimes: [String: [Date]] = [:]
@@ -195,7 +217,7 @@ final class Room {
     private var inflight: [(id: String, project: String, target: String)] = []
     private static let maxInflight = 64
 
-    // MARK: - keys and roster
+    // MARK: - keys, access and clones
 
     // `nonisolated`: both are pure string functions with no state behind them,
     // and Gateway calls them from its own serial queue on every history
@@ -218,10 +240,17 @@ final class Room {
         return (agent: parts[1], project: parts[3])
     }
 
-    /// Every clone session Bridge needs to watch: the projects crossed with
-    /// their rosters. This is what Gateway subscribes to.
+    /// Every clone session Bridge needs to watch: each project's `main` — whose
+    /// session is the room and always exists — plus the clones actually launched
+    /// there. This is what Gateway subscribes to.
+    ///
+    /// Drawn from `clones` rather than from `access`, because access is a
+    /// permission and a subscription is a claim that a session exists. An agent
+    /// Chancellor has allowed in but never launched has no session to watch.
     var keys: [String] {
-        projects.flatMap { p in p.roster.map { Room.key($0, project: p.id) } }
+        projects.flatMap { p in
+            [Room.key("main", project: p.id)] + p.clones.map { Room.key($0.id, project: p.id) }
+        }
     }
 
     func setAgents(_ list: [(id: String, name: String)]) {
@@ -248,10 +277,33 @@ final class Room {
 
     func project(_ id: String) -> Prefs.Project? { projects.first { $0.id == id } }
 
-    /// The agents a message said inside `project` is allowed to reach. Empty for
-    /// an unknown project, which is what makes an unknown project unroutable
-    /// rather than unrestricted.
-    func roster(of project: String) -> [String] { self.project(project)?.roster ?? [] }
+    /// The agents a message said inside `project` is allowed to reach: the
+    /// access list Chancellor set. Empty for an unknown project, which is what
+    /// makes an unknown project unroutable rather than unrestricted.
+    func access(of project: String) -> [String] { self.project(project)?.access ?? [] }
+
+    /// The clones actually launched in `project`, in tab order. `main` is not
+    /// among them — its session is the room.
+    func clones(of project: String) -> [Prefs.Clone] { self.project(project)?.clones ?? [] }
+
+    /// The tabs a project shows: `main` first, because the room IS main's tab,
+    /// then one per launched clone. An agent with access but no clone has no tab
+    /// and no session; that is the difference between being allowed in and being
+    /// here.
+    func tabs(of project: String) -> [String] {
+        ["main"] + clones(of: project).map { $0.id }
+    }
+
+    /// "active", "idle", or nil when this agent is not launched here. `main` is
+    /// always active: the room cannot be parked.
+    func cloneState(_ agentId: String, project: String) -> String? {
+        if agentId == "main" { return self.project(project) == nil ? nil : Prefs.Clone.active }
+        return self.project(project)?.cloneState(agentId)
+    }
+
+    func isLaunched(_ agentId: String, project: String) -> Bool {
+        cloneState(agentId, project: project) != nil
+    }
 
     func name(_ id: String) -> String {
         agents.first { $0.id == id }?.name ?? id
@@ -281,7 +333,7 @@ final class Room {
     // window — without paying for it constantly.
 
     func preamble(for target: String, project: String) -> String {
-        let mates = roster(of: project)
+        let mates = access(of: project)
             .filter { $0 != target }
             .map { $0 == "main" ? "main (Thuban)" : $0 }
             .joined(separator: ", ")
@@ -295,11 +347,13 @@ final class Room {
             + "routing: do not call session, spawn or messaging tools for this. "
             + "YOU CAN ONLY REACH AGENTS IN \(pname) — an @ for anyone else is not delivered, and "
             + "there is no way to message another project. "
-            + "MEMORY: \(Room.memoryPath(project: project, agent: target)) is yours alone, private "
-            + "to you in this project; read it when you start and append what a future you would "
-            + "need. \(Room.sharedMemoryPath) is shared by every agent in every project — read it "
-            + "to learn what the other projects are doing, and append anything they should know. "
-            + "Create either file if it is not there yet."
+            + "MEMORY: \(Room.soulPath(agent: target)) is who you are and "
+            + "\(Room.memoryPath(agent: target)) is what you have learned. BOTH ARE SHARED BY EVERY "
+            + "CLONE OF \(target) IN EVERY PROJECT — the same two files you write when you work "
+            + "anywhere else, so read them when you start and append what a future you would need, "
+            + "wherever it is working. \(Room.sharedMemoryPath) is shared by every agent in every "
+            + "project — read it to learn what the other projects are doing, and append anything "
+            + "they should know. Create any of these if it is not there yet."
     }
 
     // MARK: - sending
@@ -319,14 +373,21 @@ final class Room {
         }
         // ISOLATION, ENFORCED AT THE ONLY DOOR. Every send — Chancellor's, a
         // relay, a smoke assertion — comes through here, so a target outside
-        // this project's roster is unreachable by construction rather than by
-        // every caller remembering to check.
-        guard roster(of: project).contains(target) else {
-            note("There is no @\(target) in \(projectName(project)), so nothing was sent. "
-                 + "Agents can only reach agents inside their own project.",
+        // this project's access list is unreachable by construction rather than
+        // by every caller remembering to check.
+        guard access(of: project).contains(target) else {
+            note("@\(target) does not have access to \(projectName(project)), so nothing was sent. "
+                 + "Agents can only reach agents inside their own project, and only the ones "
+                 + "Chancellor has let into it.",
                  project: project, kind: "error")
             return nil
         }
+        // DELIVERING TO AN AGENT LAUNCHES IT. Access is the authorisation and
+        // Chancellor already gave it; requiring him to also press Launch before
+        // any teammate could be handed work would make the room unusable for the
+        // one thing it exists to do. A ping to a clone he has parked wakes it,
+        // for the same reason — "idle" is a rest state, not a refusal.
+        launchIfNeeded(target, project: project)
         let roomKey = Room.key(target, project: project)
         let d = doc(project)
         let n = (d.since[roomKey] ?? Room.reanchorEvery)          // unseen session -> anchor
@@ -424,7 +485,7 @@ final class Room {
             // Resolved against THIS PROJECT'S ROSTER, which is what stops an
             // agent reaching out of its project by naming a lane that exists
             // somewhere else on the gateway.
-            let targets = Room.pings(in: text, agents: roster(of: project), excluding: lane)
+            let targets = Room.pings(in: text, agents: access(of: project), excluding: lane)
             append(Msg(id: newId(), at: Date().timeIntervalSince1970 * 1000,
                        from: lane, to: targets, text: text, kind: "say", hop: hop),
                    project: project)
@@ -435,8 +496,8 @@ final class Room {
     }
 
     /// Everything the agent addressed, in the order it addressed it. `agents` is
-    /// the caller's allowed set — for a relay that is the project's roster, and
-    /// a handle naming a lane outside it simply does not match.
+    /// the caller's allowed set — for a relay that is the project's access list,
+    /// and a handle naming a lane outside it simply does not match.
     nonisolated static func pings(in text: String, agents: [String], excluding self_: String) -> [String] {
         var out: [String] = []
         let ns = text as NSString
@@ -469,7 +530,7 @@ final class Room {
     }
 
     private func relayPings(in text: String, from lane: String, project: String, hop: Int) {
-        let targets = Room.pings(in: text, agents: roster(of: project), excluding: lane)
+        let targets = Room.pings(in: text, agents: access(of: project), excluding: lane)
         guard !targets.isEmpty else { return }
 
         if doc(project).paused {
@@ -552,6 +613,111 @@ final class Room {
         note("Not delivered to @\(hit.target) — \(code): \(message). The turn above is in this "
              + "transcript but never reached the gateway. Send it again once the connection "
              + "is back.", project: hit.project, kind: "error")
+    }
+
+    // MARK: - the life of a clone
+    //
+    // A clone is a real gateway session. It comes into being when it is launched
+    // — either by Chancellor, or by the first turn delivered to it — and it ends
+    // one of two ways, BOTH OF WHICH ARE HIS DECISION AND NEITHER OF WHICH IS
+    // AUTOMATIC:
+    //
+    //   * IDLE. The task is done; keep the clone. Its run is stopped, its
+    //     session and its transcript stay, its tab stays, and its memory is the
+    //     agent's own and was never in here anyway. A later ping wakes it.
+    //   * KILL. The task is done; the clone is not wanted. Its run is stopped,
+    //     its gateway session is deleted, and its tab goes.
+    //
+    // Nothing here decides between them and nothing here times out into one.
+    // Bridge does not garbage-collect a clone he has not spoken about.
+    //
+    // WHO OWNS THE RECORD. `projects` is a MIRROR of Prefs, and the page is the
+    // only writer of that document. So these methods update the mirror, act on
+    // the gateway, and `push()` the result; live.js `reconcileClones` sees the
+    // new clone set and saves it back through the ordinary `prefs` message. The
+    // alternative — writing prefs.json from here — races the page, which sends
+    // the WHOLE document on every save and would silently undo it.
+
+    /// Bring a clone into being, or wake a parked one. Returns true if anything
+    /// changed. Refuses an agent that is not in the project's access list: this
+    /// is the same boundary `deliver` enforces, checked here too because a
+    /// launch is the thing that creates the session.
+    @discardableResult
+    func launchIfNeeded(_ agentId: String, project: String) -> Bool {
+        guard agentId != "main" else { return false }              // its clone is the room
+        guard let pi = projects.firstIndex(where: { $0.id == project }) else { return false }
+        guard projects[pi].access.contains(agentId) else { return false }
+        if let ci = projects[pi].clones.firstIndex(where: { $0.id == agentId }) {
+            guard projects[pi].clones[ci].state != Prefs.Clone.active else { return false }
+            projects[pi].clones[ci].state = Prefs.Clone.active
+        } else {
+            projects[pi].clones.append(Prefs.Clone(id: agentId, state: Prefs.Clone.active))
+            Gateway.shared.subscribeRoom(keys)
+        }
+        push()
+        return true
+    }
+
+    /// Launch by hand, from the picker. Says so in the room, because a new clone
+    /// in a project is a thing that happened and the transcript is where the
+    /// project's history is kept.
+    func launch(_ agentId: String, project: String) {
+        guard agentId != "main", self.project(project) != nil else { return }
+        guard access(of: project).contains(agentId) else {
+            note("@\(agentId) has not been given access to \(projectName(project)), so it was not "
+                 + "launched.", project: project, kind: "error")
+            return
+        }
+        guard !isLaunched(agentId, project: project) else {
+            launchIfNeeded(agentId, project: project)              // wake it if it was parked
+            return
+        }
+        launchIfNeeded(agentId, project: project)
+        note("Launched @\(agentId) in \(projectName(project)). It is a clone of \(name(agentId)) "
+             + "scoped to this project: its own session, sharing this project's room and this "
+             + "agent's memory.", project: project, kind: "note")
+    }
+
+    /// Park a clone: stop what it is doing, keep everything it is.
+    func setIdle(_ agentId: String, project: String) {
+        guard agentId != "main" else { return }                    // the room is not parkable
+        guard let pi = projects.firstIndex(where: { $0.id == project }),
+              let ci = projects[pi].clones.firstIndex(where: { $0.id == agentId }) else { return }
+        guard projects[pi].clones[ci].state != Prefs.Clone.idle else { return }
+        projects[pi].clones[ci].state = Prefs.Clone.idle
+        // Stop the run. Parking a clone that is mid-turn and letting the turn
+        // finish anyway would make "idle" a label rather than a state.
+        Gateway.shared.abortRun(sessionKey: Room.key(agentId, project: project),
+                                requestId: "room-idle-\(newId())")
+        note("@\(agentId) is idle in \(projectName(project)). Its session and its memory are kept; "
+             + "ping it and it picks the work back up.", project: project, kind: "note")
+        push()
+    }
+
+    /// End a clone: stop it, delete its gateway session, drop its tab.
+    ///
+    /// The agent's SOUL.md and MEMORY.md are untouched. They belong to the agent
+    /// and are shared by its clones everywhere else; deleting them because one
+    /// project is finished with it would erase what it learned in all the
+    /// others.
+    func kill(_ agentId: String, project: String) {
+        guard agentId != "main" else { return }                    // that is removing the project
+        guard let pi = projects.firstIndex(where: { $0.id == project }),
+              projects[pi].clones.contains(where: { $0.id == agentId }) else { return }
+        projects[pi].clones.removeAll { $0.id == agentId }
+        let key = Room.key(agentId, project: project)
+        // The high-water mark goes with it. If he ever launches this agent here
+        // again, the gateway hands back a fresh session under the same key, and a
+        // stale mark would make the room ignore its first turns.
+        mutate(project) { $0.seen.removeValue(forKey: key)
+                          $0.since.removeValue(forKey: key)
+                          $0.hop.removeValue(forKey: key) }
+        Gateway.shared.abortRun(sessionKey: key, requestId: "room-kill-\(newId())")
+        Gateway.shared.deleteSession(sessionKey: key, requestId: "room-kill-\(newId())")
+        note("Killed @\(agentId) in \(projectName(project)): its session here is deleted and its "
+             + "tab is gone. \(name(agentId))'s own memory is untouched — it is shared with every "
+             + "other project this agent works in.", project: project, kind: "note")
+        save(); push()
     }
 
     // MARK: - controls
@@ -644,9 +810,17 @@ final class Room {
                 "paused": d.paused,
                 "pauseReason": d.pauseReason,
                 "relaysInWindow": live.count,
-                "agents": p.roster.map {
-                    ["id": $0, "name": name($0), "key": Room.key($0, project: p.id)]
+                // The tabs, in tab order: main first, then the launched clones.
+                "agents": tabs(of: p.id).map {
+                    ["id": $0, "name": name($0), "key": Room.key($0, project: p.id),
+                     "state": cloneState($0, project: p.id) ?? Prefs.Clone.active]
                 },
+                // Who is allowed in, and who is actually here. live.js mirrors
+                // `clones` straight back into prefs — see `reconcileClones` — so
+                // a clone launched by a relayed ping is persisted without this
+                // file writing the document the page owns.
+                "access": p.access,
+                "clones": p.clones.map { ["id": $0.id, "state": $0.state] },
             ]
         }
         ActiveWebView.shared.emit([

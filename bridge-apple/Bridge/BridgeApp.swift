@@ -285,6 +285,20 @@ final class Shell: ObservableObject {
             Room.shared.fromChancellor(text: text, ping: (ping?.isEmpty ?? true) ? nil : ping,
                                        project: project)
 
+        // THE LIFE OF A CLONE. Launch, park, kill — each of them Chancellor's
+        // decision, each arriving from a click and from nothing else. Room does
+        // the gateway half and pushes the new clone set back; the page mirrors
+        // it into the preference document it owns.
+        case "clone":
+            guard let project = body["project"] as? String, !project.isEmpty,
+                  let agent = body["agent"] as? String, !agent.isEmpty else { return }
+            switch body["op"] as? String {
+            case "launch": Room.shared.launch(agent, project: project)
+            case "idle":   Room.shared.setIdle(agent, project: project)
+            case "kill":   Room.shared.kill(agent, project: project)
+            default:       NSLog("bridge: unknown clone op")
+            }
+
         case "room.pause":
             guard let project = body["project"] as? String, !project.isEmpty else { return }
             Room.shared.setPaused(body["paused"] as? Bool ?? true, project: project)

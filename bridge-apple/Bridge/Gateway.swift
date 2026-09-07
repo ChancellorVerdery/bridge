@@ -818,6 +818,28 @@ final class Gateway {
         }
     }
 
+    /// Delete a session outright. This is what KILLING A CLONE means: the
+    /// project is finished with that agent, and leaving the session behind would
+    /// leave a transcript and a context window alive on the gateway that nothing
+    /// in Bridge can reach any more.
+    ///
+    /// It is only ever reached from a click. Nothing arriving on the socket can
+    /// get here — Room.kill is called from the `clone` message and from nowhere
+    /// else, and an agent has no way to send one.
+    ///
+    /// The result goes back to the page like any other write, so a refusal (this
+    /// is session-admin territory and Bridge may not be granted it) is drawn
+    /// rather than swallowed. Room has already dropped the clone by then: the
+    /// tab is gone either way, and the gateway keeping a session Bridge can no
+    /// longer see is a smaller lie than a tab for a clone he has killed.
+    func deleteSession(sessionKey: String, requestId: String) {
+        q.async {
+            self.call("sessions.delete", ["key": sessionKey]) { [weak self] payload, error in
+                self?.emitWriteResult("sessions.delete", requestId, sessionKey, payload, error)
+            }
+        }
+    }
+
     private func emitWriteResult(_ method: String, _ requestId: String, _ sessionKey: String,
                                  _ payload: [String: Any]?, _ error: [String: Any]?) {
         var msg: [String: Any] = ["type": "writeResult", "method": method,

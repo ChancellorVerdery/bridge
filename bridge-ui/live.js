@@ -65,7 +65,7 @@ const LIVE = {
    first paint that races the load cannot overwrite last week's projects with
    this second's blanks. */
 
-const PREFS = { loaded: false, version: 2, sshHost: 'atlas', projects: [], inboxRead: [] };
+const PREFS = { loaded: false, version: 3, sshHost: 'atlas', projects: [], inboxRead: [] };
 
 function savePrefs() {
   if (!PREFS.loaded) return;            // never write back what was never read
@@ -120,17 +120,44 @@ function requireUserIntent(what) {
   }
 }
 
-/* Every agent the gateway reports, `main` first. THIS IS THE CLONE SET: creating
-   a project copies it in whole, so `frontend-design` in Bridge and
-   `frontend-design` in CalcNotes are two separate live sessions that share no
-   state. Falls back to the ids already rostered somewhere when agents.list has
-   not answered yet, so a project made in the first second of a launch is not
-   born empty. */
+/* Every agent the gateway reports, `main` first. THIS IS THE MENU, NOT A ROSTER:
+   it is the list the access picker offers, and nothing here puts an agent into a
+   project. Which of these are allowed into which project is Chancellor's choice
+   and is stored per project in `access`.
+
+   The previous pass used this as the clone set and copied it whole into every
+   project. That is the assumption v3 exists to undo — his own document had seven
+   agents in Bridge and one in Atlas, and "a project holds them all" would have
+   overwritten both.
+
+   Falls back to the ids already granted access somewhere when agents.list has not
+   answered yet, so the picker is not empty in the first second of a launch. */
 function agentSet() {
   let ids = LIVE.agents.map((a) => a.id);
-  if (!ids.length) ids = [...new Set(PREFS.projects.flatMap((p) => p.roster || []))];
+  if (!ids.length) ids = [...new Set(PREFS.projects.flatMap((p) => accessOf(p)))];
   if (!ids.includes('main')) ids = ['main', ...ids];
   return ['main', ...ids.filter((id) => id !== 'main')];
+}
+
+/* A project's access list, `main` first and always present. Reads `roster` as a
+   fallback so a v2 document mirrored into the page before Swift has rewritten it
+   still renders his real choice rather than an empty project. */
+function accessOf(p) {
+  const raw = (p && (p.access || p.roster)) || [];
+  const out = raw.filter((id) => id && id !== 'main');
+  return ['main', ...[...new Set(out)]];
+}
+
+/* A project's launched clones: [{id, state}]. Never contains `main` — its clone
+   is the room. */
+function clonesOf(p) {
+  return ((p && p.clones) || []).filter((c) => c && c.id && c.id !== 'main');
+}
+
+function cloneStateOf(p, agentId) {
+  if (agentId === 'main') return 'active';
+  const c = clonesOf(p).find((x) => x.id === agentId);
+  return c ? (c.state === 'idle' ? 'idle' : 'active') : null;
 }
 
 const projectSlug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-')
@@ -147,15 +174,56 @@ function newProjectId(name) {
   return base + '-' + n;
 }
 
-/* CREATING A PROJECT CLONES THE AGENT SET INTO IT. Returns the new id. */
+/* CREATING A PROJECT CREATES AN EMPTY ONE: just its room. Returns the new id.
+
+   It does NOT copy in every agent. Who works in a project is a decision, and
+   making it silently on his behalf at creation time is exactly the assumption
+   this version removes — it also produced nine live clone keys per project, for
+   projects he had not said anything about yet. `main` is there because the room
+   is main's session; everything else he picks, and app.js opens the picker on
+   the new project so that is the next thing in front of him. */
 function projectCreate(name) {
   requireUserIntent('create a project');
   const clean = String(name || '').trim();
   if (!clean) return null;
   const id = newProjectId(clean);
-  PREFS.projects.push({ id, name: clean, roster: agentSet() });
+  PREFS.projects.push({ id, name: clean, access: ['main'], clones: [] });
   savePrefs();
   return id;
+}
+
+/* GRANT OR REVOKE ONE AGENT'S ACCESS TO ONE PROJECT.
+
+   Behind the same intent gate as creating a project, and for the same reason:
+   who may work in a project is Chancellor's decision about actors, so a code
+   path reached from a gateway message must not be able to reach it. `main` is
+   refused outright — a project whose room has no main is a room that swallows
+   everything typed into it.
+
+   REVOKING ACCESS KILLS THE CLONE. Prefs.normalisedClones drops it on save, and
+   this sends the kill so the gateway session goes too rather than being left
+   running with nothing able to reach it. */
+function accessToggle(projectId, agentId) {
+  requireUserIntent('change who has access to a project');
+  if (agentId === 'main') return false;
+  const p = prefFor(projectId);
+  if (!p) return false;
+  const access = accessOf(p);
+  const had = access.includes(agentId);
+  p.access = had ? access.filter((id) => id !== agentId) : [...access, agentId];
+  if (had && cloneStateOf(p, agentId)) cloneOp(projectId, agentId, 'kill');
+  p.clones = clonesOf(p).filter((c) => p.access.includes(c.id));
+  delete p.roster;
+  savePrefs();
+  return true;
+}
+
+/* Launch, park or kill a clone. The native side owns every one of these: it
+   holds the gateway connection, and killing means aborting a run and deleting a
+   session. It pushes the new clone set back and `reconcileClones` stores it. */
+function cloneOp(projectId, agentId, op) {
+  if (!projectId || !agentId || agentId === 'main') return false;
+  return bridgeSend({ t: 'clone', op, project: projectId, agent: agentId });
 }
 
 /* Removing a project removes its clones' rooms with it — Room.setProjects drops
@@ -170,19 +238,61 @@ function projectRemove(id) {
   return true;
 }
 
-/* New agents appearing on the gateway join every existing project, because a
-   project holds a FULL set of agents and "full" has to keep meaning that. This
-   is not a user action and deliberately does not go through the intent gate: it
-   adds agents to existing projects and can never create one. */
-function reconcileRosters() {
-  if (!PREFS.loaded || !LIVE.agents.length) return false;
-  const want = agentSet();
+/* Bring a mirrored v2 document up to the v3 shape, and nothing else.
+
+   A NEW AGENT ON THE GATEWAY JOINS NO PROJECT. That is the whole difference
+   from the previous pass, which added every new agent to every project so that
+   "a full set" would keep being true. It is not true any more and was never his
+   instruction: an agent appearing on the gateway is a fact about the gateway,
+   and whether it may work in Bridge is a decision only he makes.
+
+   So this renames `roster` to `access`, guarantees `main`, and stops. It is not
+   a user action and deliberately does not go through the intent gate: it can
+   only ever narrow a document to a shape Prefs.swift would have written anyway,
+   and it can never create a project. */
+function reconcileProjects() {
+  if (!PREFS.loaded) return false;
   let changed = false;
   for (const p of PREFS.projects) {
-    const have = new Set(p.roster || []);
-    const missing = want.filter((id) => !have.has(id));
-    if (!missing.length && (p.roster || [])[0] === 'main') continue;
-    p.roster = ['main', ...[...(p.roster || []), ...missing].filter((id) => id !== 'main')];
+    const access = accessOf(p);
+    const clones = clonesOf(p).filter((c) => access.includes(c.id));
+    const same = Array.isArray(p.access) && p.access.length === access.length
+      && p.access.every((id, i) => id === access[i])
+      && Array.isArray(p.clones) && p.clones.length === clones.length
+      && !('roster' in p);
+    if (same) continue;
+    p.access = access;
+    p.clones = clones;
+    delete p.roster;
+    changed = true;
+  }
+  if (changed) savePrefs();
+  return changed;
+}
+
+/* MIRROR THE LIVE CLONE SET BACK INTO THE PREFERENCE DOCUMENT.
+
+   Room is the runtime authority on which clones exist — a ping relayed to a
+   teammate LAUNCHES it, and that happens in Swift, mid-relay, with no click
+   anywhere. Prefs is where it has to be remembered. Room cannot write prefs.json
+   itself: the page sends the whole document on every save and would silently
+   undo it. So Room pushes its clone set with the room payload and this stores it.
+
+   Compares before saving, because it runs on every room push and the room pushes
+   on every turn. */
+function reconcileClones() {
+  if (!PREFS.loaded || !ROOM.loaded) return false;
+  let changed = false;
+  for (const p of PREFS.projects) {
+    const r = ROOM.byProject[p.id];
+    if (!r || !Array.isArray(r.clones)) continue;
+    const want = r.clones.filter((c) => c && c.id && c.id !== 'main')
+      .map((c) => ({ id: c.id, state: c.state === 'idle' ? 'idle' : 'active' }));
+    const have = clonesOf(p);
+    const same = have.length === want.length
+      && have.every((c, i) => c.id === want[i].id && (c.state || 'active') === want[i].state);
+    if (same) continue;
+    p.clones = want;
     changed = true;
   }
   if (changed) savePrefs();
@@ -839,26 +949,34 @@ function roomTabFor(proj) {
   };
 }
 
-/* One tab per rostered agent, in roster order, `main` excluded because its tab
-   IS the room and the room is prepended separately.
+/* ONE TAB PER LAUNCHED CLONE, in clone order, `main` excluded because its tab IS
+   the room and the room is prepended separately.
 
-   A rostered agent with no session yet still gets a tab. That is the honest
-   shape of a clone set: the project holds the agent whether or not anything has
-   been said to it, and a tab that is simply missing reads as a bug. */
-function rosterApply(proj, rows) {
+   Drawn from `clones`, NOT from `access`. An agent Chancellor has allowed into
+   the project but never launched is not here: it has no session, nothing has
+   been said to it, and a tab for it would be a tab for something that does not
+   exist. He launches it from the access picker, or a teammate pings it, and then
+   it appears.
+
+   A clone that HAS been launched but whose session has not been created yet — no
+   turn has been delivered — still gets a tab, because it is a thing he did. */
+function cloneTabs(proj, rows) {
   const out = [];
-  for (const id of proj.roster) {
-    if (id === 'main') continue;                 // the room tab, prepended below
+  for (const c of clonesOf(proj)) {
+    const id = c.id;
     const key = cloneKey(id, proj.id);
     const row = rows.get(key);
-    if (row) { out.push(agentFor(row)); continue; }
+    const state = c.state === 'idle' ? 'idle' : 'active';
+    if (row) { const a = agentFor(row); a.cloneState = state; out.push(a); continue; }
     const ph = placeholderAgent(id, proj.id, 'No session for this agent in ' + proj.name + ' yet.');
-    ph.plan = { purpose: agentLabel(id) + ' is one of ' + proj.name + '\'s agents and has not been '
-      + 'spoken to in this project yet. It is a real, separate clone: its session key is '
-      + cloneKey(id, proj.id) + ', its memory is private to it here, and the same agent working '
-      + 'in another project is a different session that shares none of this one\'s state. '
-      + 'Ping @' + id + ' from the room, or type below, and the session is created on the first '
-      + 'message.' };
+    ph.cloneState = state;
+    ph.plan = { purpose: agentLabel(id) + ' is launched in ' + proj.name + ' and has not been '
+      + 'spoken to yet. It is a real, separate clone: its session key is '
+      + cloneKey(id, proj.id) + ', and the same agent working in another project is a different '
+      + 'session with a different transcript. Its SOUL.md and MEMORY.md are NOT separate — every '
+      + 'clone of ' + id + ' reads and writes the same two files, so what it learned elsewhere it '
+      + 'knows here. Ping @' + id + ' from the room, or type below, and the session is created on '
+      + 'the first message.' };
     out.push(ph);
   }
   return out;
@@ -868,15 +986,18 @@ function buildCategories() {
   const rows = [...LIVE.rows.values()].filter((r) => !r.archived);
   const byKey = new Map(rows.map((r) => [r.key, r]));
 
-  // New agents on the gateway join every project, so "a full set" keeps meaning
-  // what it says. Never creates a project — see reconcileRosters.
-  reconcileRosters();
+  // Shape only: rename a v2 `roster` to `access` and guarantee `main`. A new
+  // agent on the gateway joins NO project — see reconcileProjects.
+  reconcileProjects();
+  // And store any clone a relayed ping launched while nobody was clicking.
+  reconcileClones();
 
   const cats = [];
   for (const proj of PREFS.projects) {
-    const roster = (proj.roster && proj.roster.length) ? proj.roster : agentSet();
-    const p = { ...proj, roster };
-    const agents = [roomTabFor(p), ...rosterApply(p, byKey)];
+    const access = accessOf(proj);
+    const clones = clonesOf(proj);
+    const p = { ...proj, access, clones };
+    const agents = [roomTabFor(p), ...cloneTabs(p, byKey)];
 
     /* Subagents. A session spawned BY one of this project's clones belongs to
        that clone and splits its pane, exactly as before — that is how the real
@@ -895,13 +1016,19 @@ function buildCategories() {
     }
 
     const cat = { id: p.id, name: p.name, kind: 'project', repo: null, branch: null,
-                  planned: false, agents, roster, note: '', local: true };
+                  planned: false, agents, access, clones, note: '', local: true };
 
     const real = cat.agents.filter((a) => !a._placeholder);
     const running = real.filter((a) => a.status === 'running').length;
     const failed = real.filter((a) => a.status === 'failed').length;
-    const n = roster.length;
-    cat.subtitle = n + (n === 1 ? ' agent' : ' agents')
+    // The two numbers that actually tell him what this project is: how many
+    // agents may work here, and how many are currently in it. They are different
+    // numbers now, which is the entire point of the change.
+    const n = access.length, live = clones.length;
+    const idle = clones.filter((c) => c.state === 'idle').length;
+    cat.subtitle = n + (n === 1 ? ' with access' : ' with access')
+      + ' · ' + (live ? live + ' launched' : 'none launched')
+      + (idle ? ' · ' + idle + ' idle' : '')
       + (running ? ' · ' + running + ' running' : '')
       + (failed ? ' · ' + failed + ' failed' : '');
     cats.push(cat);
@@ -918,12 +1045,14 @@ function buildCategories() {
                            glyph: a.kind === 'room' ? 'ROOM' : glyphFor(a.lane) };
     }
   }
-  // Every agent in a project is addressable by its own id too — that is what a
-  // ping bubble targets, and what "@lane" resolves against. Drawn from the
-  // ROSTERS rather than from LIVE.agents: an agent the gateway has but no
-  // project holds is not a thing anything here can address.
+  // Every agent with access to a project is addressable by its own id too —
+  // that is what a ping bubble targets, and what "@lane" resolves against. Drawn
+  // from the ACCESS LISTS rather than from LIVE.agents: an agent the gateway has
+  // but no project has let in is not a thing anything here can address. Access
+  // rather than clones, because pinging an agent that is allowed in but not yet
+  // launched is what launches it.
   for (const c of cats) {
-    for (const id of c.roster) {
+    for (const id of c.access) {
       if (!LANES[id]) LANES[id] = { name: agentLabel(id), glyph: glyphFor(id) };
     }
   }
@@ -1008,7 +1137,8 @@ const ROOM = {
   loaded: false,
 };
 
-const EMPTY_ROOM = { messages: [], paused: false, pauseReason: '', agents: [], relaysInWindow: 0 };
+const EMPTY_ROOM = { messages: [], paused: false, pauseReason: '', agents: [],
+                     relaysInWindow: 0, access: [], clones: null };
 
 /* The room for a project. Never null: a project that has never been spoken in
    has an EMPTY room, not a missing one, and every caller would otherwise carry
@@ -1026,7 +1156,8 @@ function roomSend(projectId) {
   const ping = S.roomPing || null;
   if (!bridgeSend({ t: 'room.send', text, ping, project: projectId })) {
     const r = ROOM.byProject[projectId]
-      || (ROOM.byProject[projectId] = { ...EMPTY_ROOM, messages: [], agents: [] });
+      || (ROOM.byProject[projectId] = { ...EMPTY_ROOM, messages: [], agents: [],
+                                        access: [], clones: null });
     r.messages = r.messages.concat([{
       id: 'local-' + Date.now(), at: Date.now(), from: 'bridge', to: [], kind: 'error', hop: 0,
       text: 'Bridge is not running inside the native shell, so there is no socket to relay on.',
@@ -1287,6 +1418,13 @@ window.__bridgeEmit = function (msg) {
             pauseReason: r.pauseReason || '',
             agents: r.agents || [],
             relaysInWindow: r.relaysInWindow || 0,
+            access: r.access || [],
+            /* NULL WHEN THE PAYLOAD DID NOT SAY, which is not the same fact as
+               "no clones". `reconcileClones` writes this straight into the
+               preference document, so a push that simply omits the key must
+               leave the stored clone set alone rather than erase it. Swift
+               always sends the key, so `[]` here really does mean none. */
+            clones: Array.isArray(r.clones) ? r.clones : null,
           };
         }
         ROOM.byProject = next;
@@ -1296,6 +1434,10 @@ window.__bridgeEmit = function (msg) {
         ROOM.sharedMemory = msg.sharedMemory || ROOM.sharedMemory;
         ROOM.memoryRoot = msg.memoryRoot || ROOM.memoryRoot;
         ROOM.loaded = true;
+        // A relayed ping can launch a clone with nobody clicking anything, and
+        // Room cannot write the document the page owns. This is where that
+        // becomes persistent. See reconcileClones.
+        reconcileClones();
         break;
       }
 

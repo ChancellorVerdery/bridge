@@ -136,6 +136,8 @@ const S = {
   newName: '',       // the add-a-project field
   adding: null,      // 'project' | null
   removing: null,    // projectId whose "remove?" confirmation is showing
+  access: null,      // projectId whose access picker is open
+  killing: null,     // 'projectId::agentId' whose "kill?" confirmation is showing
 
   /* ── Phase C ── the room */
   roomDraft: '',     // the main chat composer
@@ -488,7 +490,14 @@ function Nav() {
       } else if (!bits.length) {
         bits.push(real.length ? 'idle' : 'nothing said yet');
       }
-      if (c.roster && c.roster.length) bits.push(c.roster.length + ' agents');
+      // Two numbers, because they are two different facts now: who MAY work
+      // here, and who actually is. "9 agents" was the old line and it was the
+      // old assumption talking.
+      if (c.access && c.access.length) {
+        const live = (c.clones || []).length;
+        bits.push(c.access.length + ' with access');
+        bits.push(live ? live + ' launched' : 'none launched');
+      }
       bits.forEach((b, i) => { if (i) sub.append(' · '); sub.append(b); });
 
       const active = c.id === S.catId && S.view === 'sessions';
@@ -637,6 +646,14 @@ function Strip(c, a) {
   } else if (mode === 'roster') {
     head.append(h('em', 'spawned by this session · each has a tab above'));
   }
+  /* THE WAY IN TO THE ACCESS PICKER. On the strip rather than in the room header
+     because it renders on every tab in the project, and the decision it opens —
+     kill this clone, or leave it idle — is one he makes while looking at the
+     clone that just finished, not after navigating back to the room. */
+  head.append(h('button.btn.strip-ag', {
+    title: 'Who can work in ' + c.name + ', and what their clones are doing',
+    onclick: () => { S.access = c.id; S.killing = null; renderAll(); },
+  }, 'agents'));
   box.append(head);
 
   if (!list.length) {
@@ -1091,9 +1108,11 @@ function PingBar(c, a) {
   bar.append(bubble(null, 'no ping → main',
     'Unpinged. The message goes to the main session; Thuban pings whichever lane is needed.'));
 
-  // The roster if there is one, otherwise the agents actually present here.
-  const ids = (c.roster && c.roster.length)
-    ? c.roster
+  // THE ACCESS LIST, not the launched clones. Pinging an agent that is allowed
+  // in but not yet launched is exactly what launches it, so offering only what
+  // is already running would hide the normal way work starts.
+  const ids = (c.access && c.access.length)
+    ? c.access
     : [...new Set(c.agents.map((x) => x.lane))].filter(Boolean);
   for (const id of ids) {
     if (id === 'main') continue;      // "no ping" already IS main
@@ -1206,19 +1225,24 @@ const roomAt = (ms) => (ms - T0) / 1000;
    neither has a colour of its own. */
 function AgentStrip(mode, cat) {
   const el = h('nav.page-tabs.agent-strip', { 'data-mode': mode });
-  /* THE PROJECT'S OWN ROSTER, and nothing wider. This strip is how a ping is
-     chosen, so what it offers IS the set of agents reachable from here — and an
-     agent in another project must not be offerable, because Room.deliver would
-     refuse it and the refusal would read as Bridge being broken rather than as
-     isolation working. Drawn from the room payload when it has arrived (it
-     carries the real session key per clone) and from the category's roster
-     before that. */
+  /* THE PROJECT'S OWN ACCESS LIST, and nothing wider. This strip is how a ping
+     is chosen, so what it offers IS the set of agents reachable from here — and
+     an agent in another project must not be offerable, because Room.deliver
+     would refuse it and the refusal would read as Bridge being broken rather
+     than as isolation working.
+
+     ACCESS, not the launched clones. In 'ping' mode the point is who may be
+     handed work, and handing work to an allowed agent launches it. The room
+     payload's `access` is preferred because it is what Swift will actually
+     enforce; the category's copy is the pre-connection fallback. */
   const room = roomOf(cat && cat.id);
-  const roster = room.agents.length
-    ? room.agents
-    : ((cat && cat.roster) || []).map((id) => ({
-        id, name: agentLabel(id), key: 'agent:' + id + ':bridge:' + (cat ? cat.id : ''),
-      }));
+  const ids = (room.access && room.access.length)
+    ? room.access
+    : ((cat && cat.access) || []);
+  const byId = new Map((room.agents || []).map((a) => [a.id, a]));
+  const roster = ids.map((id) => byId.get(id) || ({
+    id, name: agentLabel(id), key: 'agent:' + id + ':bridge:' + (cat ? cat.id : ''),
+  }));
 
   if (mode === 'ping') {
     el.append(h('button.page-tab.ping-b', {
@@ -1287,7 +1311,7 @@ function RoomView(cat) {
   const pane = h('section.pane.room', { 'data-role': 'room', 'data-project': cat.id });
   const room = roomOf(cat.id);
   const paused = room.paused;
-  const nAgents = (cat.roster || []).length;
+  const nAgents = (cat.access || []).length;
 
   /* 1 — header. */
   const head = h('div.p-h');
@@ -1309,7 +1333,7 @@ function RoomView(cat) {
     }, 'clear') : null));
 
   head.append(h('div.p-head',
-    'One transcript for ' + cat.name + ', ' + nAgents + ' agents. Unpinged goes to this '
+    'One transcript for ' + cat.name + ', ' + nAgents + ' agents with access. Unpinged goes to this '
     + 'project’s main; a ping goes to that clone and main does not see it. Everything said '
     + 'lands here. Agents in ' + cat.name + ' can only reach each other — there is no '
     + 'cross-project messaging.'));
@@ -1426,11 +1450,13 @@ function RoomFoot(cat) {
 
   /* 5 — metadata. What the room costs, where it is kept, and where its agents
      remember things — the memory paths are the only place a reader can find out
-     that a clone has a private file AND a shared one. */
+     that memory follows the AGENT rather than the project, which is the one
+     thing about this model that is genuinely surprising. */
   const pair = (label, value) => h('span', null, h('b', label), h('i', value));
   box.append(h('div.p-use',
     pair('messages', fmtNum(room.messages.length)),
-    pair('agents', String((cat.roster || []).length)),
+    pair('access', String((cat.access || []).length)),
+    pair('launched', String((cat.clones || []).length)),
     pair('relay', room.paused ? 'paused' : room.relaysInWindow + '/' + ROOM.maxRelays),
     pair('hop ceiling', String(ROOM.maxHops)),
     pair('voice', (LIVE.voice && LIVE.voice.route) === 'local'
@@ -1440,7 +1466,8 @@ function RoomFoot(cat) {
     h('span', null, h('b', 'threads '), 'agent:<id>:bridge:' + cat.id + ', one per agent in this '
       + 'project, persistent and separate from every other project'),
     h('span', null, h('b', 'memory '), (ROOM.memoryRoot || '~/.openclaw/workspace/memory/bridge')
-      + '/' + cat.id + '/<agent>.md private per clone · '
+      + '/<agent>/{SOUL,MEMORY}.md — per AGENT, not per project: every clone of an agent shares '
+      + 'these wherever it works · '
       + (ROOM.sharedMemory || '~/.openclaw/workspace/memory/bridge/SHARED.md') + ' shared by all'),
     h('span', null, h('b', 'routing '), 'Bridge relays as an operator client — agentToAgent stays off')));
   return box;
@@ -1806,22 +1833,26 @@ function SettingsView() {
 
   /* ── projects and their rooms ── */
   const projects = typeof PREFS !== 'undefined' ? PREFS.projects : [];
-  const clones = projects.reduce((n, p) => n + ((p.roster || []).length), 0);
+  const clones = projects.reduce((n, p) => n + ((p.clones || []).length), 0);
   const pausedIn = projects.filter((p) => roomOf(p.id).paused).map((p) => p.name);
   box.append(SetSection('Projects and rooms',
-    'A project is the unit of isolation. Each holds a full set of agent clones and one room.',
+    'A project is the unit of isolation. Chancellor decides which agents may work in each '
+    + 'one; a launched agent is a clone with its own session and this project\'s room.',
     h('div.set-rows',
       SetRow('projects', projects.length ? projects.map((p) => p.name).join(', ') : 'none yet'),
-      SetRow('clones', clones + ' across ' + projects.length
+      SetRow('clones launched', clones + ' across ' + projects.length
         + (projects.length === 1 ? ' project' : ' projects')),
+      SetRow('memory', 'per AGENT, not per project — every clone of an agent reads and writes '
+        + ((typeof ROOM !== 'undefined' && ROOM.memoryRoot) || '~/.openclaw/workspace/memory/bridge')
+        + '/<agentId>/{SOUL,MEMORY}.md'),
       SetRow('threads', 'agent:<id>:bridge:<projectId> — one persistent session per clone'),
       SetRow('relay', pausedIn.length ? 'paused in ' + pausedIn.join(', ') : 'live'),
       SetRow('hop ceiling', String((typeof ROOM !== 'undefined' && ROOM.maxHops) || 6)),
       SetRow('rate limit', ((typeof ROOM !== 'undefined' && ROOM.maxRelays) || 0)
         + ' relays per ' + ((typeof ROOM !== 'undefined' && ROOM.relayWindowMin) || 5)
         + ' minutes, counted per project'),
-      SetRow('private memory', (ROOM.memoryRoot || '~/.openclaw/workspace/memory/bridge')
-        + '/<projectId>/<agent>.md'),
+      SetRow('agent memory', (ROOM.memoryRoot || '~/.openclaw/workspace/memory/bridge')
+        + '/<agentId>/{SOUL,MEMORY}.md — one identity per agent, shared by all its clones'),
       SetRow('shared memory', ROOM.sharedMemory || '~/.openclaw/workspace/memory/bridge/SHARED.md'),
       SetRow('store', '~/Library/Application Support/Bridge/{prefs,room}.json')),
     h('p.set-note', 'BRIDGE does the routing; the agents do not. A message with no ping goes to '
@@ -1907,21 +1938,147 @@ const SetSection = (title, lede, ...kids) =>
   h('section.set-s', h('h3', title), lede ? h('p.set-lede', lede) : null, ...kids);
 const SetRow = (k, v) => h('div.set-row', h('b', k), h('i', v));
 
-/* THE ROSTER PICKER IS GONE, and its absence is the feature.
+/* ───────────────── ACCESS: WHO MAY WORK IN THIS PROJECT ─────────────────
 
-   It let you choose which agents got a tab in a project. A project now holds a
-   FULL set of agent clones by definition — that is what makes it the unit of
-   isolation — so a control for deselecting some of them was a control for
-   making the invariant false. Agents join a project by existing on the gateway
-   (`reconcileRosters` in live.js), and nothing in the UI can take one out.
+   The previous pass deleted the picker that used to live here, on the reasoning
+   that a project holds every agent by definition so a control for deselecting
+   one was a control for making the invariant false. The invariant was the
+   mistake. Chancellor decides who works in a project; this is where he decides
+   it, and the two halves of that decision are drawn as two halves:
 
-   The panel's one genuinely useful piece of prose — why Bridge will not create
-   an AGENT, which needs operator.admin and a gateway restart — has moved to the
-   empty-project pane below, where it is still read. */
+     ACCESS — may this agent work here at all. Ticking a name grants it; it does
+       not start anything. Unticking revokes it AND kills the clone, because
+       leaving a live session behind for an agent that has just been excluded is
+       an access control that controls nothing.
 
-/* CREATING A PROJECT CLONES THE AGENT SET INTO IT — `projectCreate` does that
-   part, in live.js, and it throws unless the intent token is set. Both callers
-   of this function are wrapped in `fromUser`; nothing else calls it. */
+     THE CLONE — has it actually been launched, and is it working or parked.
+       Launch brings it into being. After a task, Idle keeps it and Kill ends
+       it; both are here because both are his call and neither happens on its
+       own. Bridge never reaps a clone he has not spoken about.
+
+   `main` is fixed on. Its clone IS the room, so a project without it is a
+   project whose room swallows everything typed into it. */
+
+function AccessPanel(c) {
+  const access = c.access || [];
+  const clones = c.clones || [];
+  const box = h('div.cust', { 'data-enter': 'cust:' + c.id });
+  box.append(h('div.cust-h', 'Who can work in ', h('b', c.name),
+    h('span.spacer'),
+    h('button.btn', { onclick: () => { S.access = null; S.killing = null; renderAll(); } }, 'done')));
+
+  if (!LIVE.agents.length) {
+    box.append(h('div.strip-none', 'The gateway has not answered agents.list yet, so there is '
+      + 'nothing to pick from. The agents already allowed in are still listed below.'));
+  } else {
+    box.append(h('div.cust-grid', LIVE.agents.map((ag) => {
+      const on = access.includes(ag.id);
+      const isMainAgent = ag.id === 'main';
+      const st = cloneStateOf(c, ag.id);
+      return h('button.cust-a', {
+        'data-on': on ? '1' : '0',
+        disabled: isMainAgent,
+        title: isMainAgent
+          ? 'main is always in a project: its clone is the room.'
+          : (on ? 'Revoke ' + ag.id + '’s access to ' + c.name
+                : 'Let ' + ag.id + ' work in ' + c.name),
+        onclick: fromUser(() => { if (!isMainAgent) toggleAccess(c, ag.id); }),
+      },
+        h('span.cust-m', on ? '✓' : '+'),
+        h('span.cust-n', ag.name),
+        h('span.cust-i', ag.id),
+        h('span.cust-l', { 'data-live': st === 'active' ? '1' : '0' },
+          isMainAgent ? 'the room' : st ? (st === 'idle' ? 'launched · idle' : 'launched')
+                                        : on ? 'not launched' : 'no access'));
+    })));
+  }
+
+  /* THE CLONES, one row each, with the two decisions on them. Only agents with
+     access appear: a clone of an excluded agent cannot exist, because revoking
+     killed it. */
+  const rows = h('div.cln');
+  for (const id of access) {
+    if (id === 'main') continue;
+    const st = cloneStateOf(c, id);
+    const key = c.id + '::' + id;
+    const row = h('div.cln-r', { 'data-state': st || 'none' },
+      h('span.cln-n', agentLabel(id)),
+      h('span.cln-i', id),
+      h('span.cln-s', st === 'idle' ? 'idle' : st ? 'launched' : 'not launched'),
+      h('span.spacer'));
+    if (!st) {
+      row.append(h('button.btn', {
+        title: 'Create ' + id + '’s clone in ' + c.name + ' — its own session, this project’s room.',
+        onclick: () => cloneOp(c.id, id, 'launch'),
+      }, 'Launch'));
+    } else {
+      row.append(h('button.btn', {
+        title: st === 'idle'
+          ? 'Put ' + id + ' back to work in ' + c.name + '.'
+          : 'Stop what ' + id + ' is doing here and park it. Session and memory are kept.',
+        onclick: () => cloneOp(c.id, id, st === 'idle' ? 'launch' : 'idle'),
+      }, st === 'idle' ? 'Wake' : 'Idle'));
+      /* KILL IS TWO-STEP. It deletes a gateway session and its transcript, which
+         is not something to do on one stray click — the same reason removing a
+         project is two-step. */
+      if (S.killing === key) {
+        row.append(h('span.cln-q', 'Delete this clone’s session?'),
+          h('button.add-go', {
+            onclick: () => { S.killing = null; cloneOp(c.id, id, 'kill'); },
+          }, 'Kill'),
+          h('button.add-x', { onclick: () => { S.killing = null; renderAll(); } }, '×'));
+      } else {
+        row.append(h('button.btn.cln-k', {
+          title: 'End ' + id + ' in ' + c.name + ': its session here is deleted and its tab goes. '
+            + 'Its memory is the agent’s own and is untouched.',
+          onclick: () => { S.killing = key; renderAll(); },
+        }, 'Kill'));
+      }
+    }
+    rows.append(row);
+  }
+  if (access.length > 1) box.append(rows);
+
+  /* Creating an AGENT is a different kind of act from letting one in, and the
+     control says so instead of being absent. Disabled with the reason on it — a
+     disabled control with no explanation is just a broken one. */
+  box.append(h('div.cust-new',
+    h('button.cust-a', { disabled: true, 'data-new': '1' },
+      h('span.cust-m', '+'), h('span.cust-n', 'New agent…'),
+      h('span.cust-i', 'disabled')),
+    h('p.cust-why', h('b', 'Why this is off: '),
+      'creating an agent writes the gateway\'s own configuration on the Linux host — a new '
+      + 'agents entry, a workspace, an agent directory — and the gateway must be restarted to '
+      + 'pick it up. That is Chancellor\'s call and a config change, not a click in a monitor. '
+      + 'Bridge would also need operator.admin, which it deliberately does not request. '
+      + 'Picking from the agents that already exist is what this panel does.')));
+
+  const nLive = clones.length;
+  box.append(h('p.cust-foot',
+    access.length + ' of ' + (LIVE.agents.length || access.length) + ' agents may work in '
+    + c.name + '; ' + (nLive ? nLive + ' launched here' : 'none launched yet') + '. Tabs are the '
+    + 'room first, then one per launched clone — an agent with access that has not been launched '
+    + 'has no session and no tab. Memory is NOT per project: every clone of an agent reads and '
+    + 'writes the same SOUL.md and MEMORY.md wherever it works, so what it learned in another '
+    + 'project it knows here.'));
+  return box;
+}
+
+/* Grant or revoke, then rebuild. `accessToggle` is in live.js behind the intent
+   gate, so every caller of this must be wrapped in `fromUser`. */
+function toggleAccess(c, agentId) {
+  if (!accessToggle(c.id, agentId)) return;
+  buildCategories();
+  renderAll();
+}
+
+/* CREATING A PROJECT CREATES AN EMPTY ONE — `projectCreate` does that part, in
+   live.js, and it throws unless the intent token is set. Both callers of this
+   function are wrapped in `fromUser`; nothing else calls it.
+
+   It lands in the new project's room AND opens the access picker, because a
+   project with nobody in it and no visible way to let anyone in is a dead end —
+   which is exactly what the old picker-less flow produced. */
 function commitAdd() {
   const name = (S.newName || '').trim();
   if (!name) { S.adding = null; renderAll(); return; }
@@ -1932,7 +2089,8 @@ function commitAdd() {
   S.view = 'sessions';
   S.catId = id;
   S.tab[id] = id + '::room';   // land in the new project's room, which is where
-  renderAll();                 // you say the first thing to it
+  S.access = id;               // you say the first thing to it, with the picker
+  renderAll();                 // open so there is someone to say it to
 }
 
 /* Removing a project takes its rooms with it — Room.setProjects drops the
@@ -1950,8 +2108,8 @@ function removeProject(id) {
   renderAll();
 }
 
-function openInbox() { S.view = 'inbox'; S.removing = null; renderAll(); }
-function openSettings() { S.view = 'settings'; S.removing = null; renderAll(); }
+function openInbox() { S.view = 'inbox'; S.removing = null; S.access = null; renderAll(); }
+function openSettings() { S.view = 'settings'; S.removing = null; S.access = null; renderAll(); }
 
 /* ───────────────────────── render ───────────────────────── */
 
@@ -2019,7 +2177,12 @@ function renderAll() {
   const panes = h('div.panes', a.kind === 'room' ? RoomView(c) : Pane(a, 'main', c));
   if (sub) panes.append(Pane(sub, 'sub', c));
 
-  mount('content', h('div.work', { 'data-cust': '0' }, Strip(c, a), panes));
+  /* data-cust is the access picker's open state, published to CSS: the panel
+     overlays the work area and the composer gives up its prose while it is on
+     screen. See `.work[data-cust="1"]`. */
+  const showAccess = S.access === c.id;
+  mount('content', h('div.work', { 'data-cust': showAccess ? '1' : '0' },
+    showAccess ? AccessPanel(c) : null, Strip(c, a), panes));
   markEntrances();
   syncHash();
   restoreUi(keep);
@@ -2091,11 +2254,12 @@ function renderNoProjects(keep) {
   mount('content', h('div.work',
     h('div.empty-cat', { 'data-enter': 'noprojects' },
       h('b', 'Make a project to start.'),
-      h('p', 'A project holds a full set of agent clones and its own room. The same agent in '
-        + 'two projects is two separate sessions that share no state, so work in one cannot '
-        + 'leak into the other. Each clone keeps a private memory file per project, and every '
-        + 'clone everywhere also reads and appends to one shared file, so they know what the '
-        + 'other projects are doing.'),
+      h('p', 'A project has its own room, and you choose which agents may work in it. Launching '
+        + 'one makes a CLONE: the same agent in two projects is two separate sessions with two '
+        + 'separate transcripts, so work in one cannot leak into the other. Their MEMORY is not '
+        + 'separate — every clone of an agent reads and writes the same SOUL.md and MEMORY.md '
+        + 'wherever it works, so an agent stays one agent. When a task is done you either kill '
+        + 'the clone or leave it idle.'),
       h('p.empty-cat-w', h('b', 'You make projects. '),
         'Agents cannot — not by convention but in code: nothing arriving from the gateway can '
         + 'add one, and the create path refuses to run unless a click on this window is what '

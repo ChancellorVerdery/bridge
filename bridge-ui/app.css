@@ -1678,3 +1678,25 @@ body[data-split="1"] .p-use > span:not(:last-child)::after { margin: 0 7px; }
   letter-spacing: 0.1em; color: var(--ink-faint);
 }
 .ibl-e { color: var(--signal); }
+
+/* ───────────── clone rows in the access picker ─────────────
+   One line per agent with access: what it is, whether it is launched, and the
+   two controls that end a task — Idle keeps the clone, Kill deletes its session.
+   Laid out as rows rather than cards for the same reason .rost is: this list is
+   scanned, and cards cost vertical space the transcript needs. */
+.cln { display: flex; flex-direction: column; gap: 3px; margin-top: 7px;
+       padding-top: 9px; border-top: 1px solid var(--line); }
+.cln-r { display: flex; align-items: center; gap: 7px; padding: 5px 7px;
+         border: 1px solid var(--line-2); border-radius: 5px;
+         background: rgba(var(--ink-rgb), 0.03); font-size: 12.5px; }
+.cln-r[data-state="active"] { border-color: rgba(var(--brass-rgb), 0.4); }
+.cln-r[data-state="idle"] { opacity: 0.78; }
+.cln-n { font-weight: 500; }
+.cln-i { color: var(--ink-dim); font-size: 11.5px; }
+.cln-s { color: var(--ink-dim); font-size: 11.5px; font-variant: small-caps;
+         letter-spacing: 0.04em; }
+.cln-r[data-state="active"] .cln-s { color: var(--pos); }
+.cln-q { color: var(--ink-dim); font-size: 11.5px; }
+.cln-k[data-danger], .cln-k:hover { border-color: rgba(var(--neg-rgb), 0.5); color: var(--neg); }
+/* The strip's way in to the picker sits hard right, past the strip's own note. */
+.strip-ag { margin-left: 7px; }

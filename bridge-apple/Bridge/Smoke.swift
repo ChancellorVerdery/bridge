@@ -220,7 +220,8 @@ enum Smoke {
         window.__bridgeEmit({type:'agents',agents:[{id:'main',name:'Thuban'},{id:'smoke',name:'Smoke'}]});
         window.__bridgeEmit({type:'prefs',path:'/tmp/smoke-prefs.json',prefs:{
           version:2,sshHost:'atlas',inboxRead:[],
-          projects:[{id:'p-smoke',name:'Smoke',roster:['main','smoke']}]}});
+          projects:[{id:'p-smoke',name:'Smoke',access:['main','smoke'],
+                    clones:[{id:'smoke',state:'active'}]}]}});
         window.__bridgeEmit({type:'sessions',rows:[
           {key:'agent:smoke:bridge:p-smoke',agentId:'smoke',label:'Smoke session',
            status:'running',hasActiveRun:true,model:'claude-opus-5',contextTokens:10,totalTokens:20,
@@ -394,7 +395,7 @@ enum Smoke {
         var probe = Prefs()
         probe.sshHost = "smoke-host"
         probe.projects = [Prefs.Project(id: "p-smoke", name: "Smoke Project",
-                                        roster: ["main", "frontend-design"])]
+                                        access: ["main", "frontend-design"])]
         probe.inboxRead = ["t-read"]
         let before = Prefs.current
         check("prefs save reports success", Prefs.save(probe))
@@ -424,7 +425,7 @@ enum Smoke {
         Prefs.directoryOverride = URL(fileURLWithPath: "/dev/null/not-a-directory")
         var poison = Prefs()
         poison.sshHost = "never-written"
-        poison.projects = [Prefs.Project(id: "p-lost", name: "Lost", roster: [])]
+        poison.projects = [Prefs.Project(id: "p-lost", name: "Lost", access: [])]
         let saved = Prefs.save(poison)
         Prefs.directoryOverride = realPrefsDir
         check("a prefs save that cannot write reports failure", !saved)
@@ -478,7 +479,7 @@ enum Smoke {
         let shotSnapshot = Prefs.current
         var polluted = shotSnapshot
         polluted.projects.append(Prefs.Project(id: "p-shotempty-fixture", name: "Empty Project",
-                                               roster: []))
+                                               access: []))
         check("a shot view can write into the real preference document",
               Prefs.save(polluted) && Prefs.current.projects.contains { $0.id == "p-shotempty-fixture" })
         check("and the shot restore puts it back, on disk and in memory",
@@ -506,9 +507,17 @@ enum Smoke {
         window.__bridgeEmit({type:'prefs',path:'/tmp/prefs.json',tokenPresent:true,prefs:{
           version:2,sshHost:'atlas',inboxRead:['done-old'],
           projects:[{id:'p-bridge',name:'Bridge',
-                     roster:['main','frontend-design','backend-design','coursework','macos-expert']},
+                     access:['main','frontend-design','backend-design','coursework','macos-expert'],
+                     clones:[{id:'frontend-design',state:'active'},
+                             {id:'backend-design',state:'active'},
+                             {id:'coursework',state:'active'},
+                             {id:'macos-expert',state:'active'}]},
                     {id:'p-atlas',name:'Atlas',
-                     roster:['main','frontend-design','backend-design','coursework','macos-expert']}]}});
+                     access:['main','frontend-design','backend-design','coursework','macos-expert'],
+                     clones:[{id:'frontend-design',state:'active'},
+                             {id:'backend-design',state:'active'},
+                             {id:'coursework',state:'active'},
+                             {id:'macos-expert',state:'active'}]}]}});
         // Real clone sessions, so the projects are not made entirely of
         // placeholders. The keys are `agent:<id>:bridge:<projectId>` because
         // that is the only way a session belongs to a project now.
@@ -662,9 +671,9 @@ enum Smoke {
         """)) as? String ?? "{}"
         let R = (try? JSONSerialization.jsonObject(with: Data(rost.utf8))) as? [String: Any] ?? [:]
         let lanes = R["lanes"] as? [String] ?? []
-        // The picker is gone: a project holds every agent, so what is asserted
-        // is the ORDER — main first, because main's tab is the room.
-        check("a project's tabs are main first, then one per agent",
+        // Main first, because main's tab is the room, then the launched clones
+        // in clone order.
+        check("a project's tabs are main first, then one per launched clone",
               lanes.first == "main" && Set(lanes) == Set(["main", "frontend-design",
                 "backend-design", "coursework", "macos-expert"]), rost)
 
@@ -1000,20 +1009,19 @@ enum Smoke {
         try? await Task.sleep(nanoseconds: 250_000_000)
 
         // Both fixtures below write through the REAL preference store — that is
-        // the point of them, since the roster picker's whole job is to persist a
+        // the point of them, since the access picker's whole job is to persist a
         // choice — so the document is snapshotted here and put back afterwards.
-        // A test that leaves a roster override and a stub project in
+        // A test that leaves an access override and a stub project in
         // Chancellor's prefs.json has changed the app it was measuring.
         let prefsBeforePicker = Prefs.current
 
         // ---- THE SIDEBAR, EXACTLY ---------------------------------------------
         //
-        // The roster-picker geometry assertions that used to live here are gone
-        // with the picker itself — a project holds a full clone set by
-        // definition, so there is nothing to pick. What replaces them is the
-        // structure the picker used to sit inside, asserted directly, because
-        // "the sidebar has no Room entry" is the kind of claim that is true the
-        // day it is written and quietly false four passes later.
+        // The sidebar's structure, asserted directly, because "the sidebar has no
+        // Room entry" is the kind of claim that is true the day it is written and
+        // quietly false four passes later. The access picker it used to sit
+        // beside is back — see the clone-lifecycle section — but it is a panel in
+        // the work area, not a part of this.
         let sidebar = (try? await web.evaluateJavaScript("""
           (function(){
             renderAll();
@@ -1081,7 +1089,8 @@ enum Smoke {
               firstKind: tabsInOrder[0] ? (tabsInOrder[0].kind || 'agent') : null,
               firstLane: tabsInOrder[0] ? tabsInOrder[0].lane : null,
               lanes: tabsInOrder.map(a => a.lane),
-              roster: c.roster,
+              access: c.access,
+              clones: (c.clones||[]).map(x => x.id),
               strip,
               roomRendered: !!document.querySelector('.pane.room'),
               roomProject: (document.querySelector('.pane.room')||{getAttribute:()=>null})
@@ -1091,18 +1100,24 @@ enum Smoke {
         """)) as? String ?? "{}"
         let TB = (try? JSONSerialization.jsonObject(with: Data(tabs.utf8))) as? [String: Any] ?? [:]
         let tbLanes = TB["lanes"] as? [String] ?? []
-        let tbRoster = TB["roster"] as? [String] ?? []
+        let tbAccess = TB["access"] as? [String] ?? []
+        let tbClones = TB["clones"] as? [String] ?? []
         check("a project's FIRST tab is main, and it is the room",
               TB["firstKind"] as? String == "room" && TB["firstLane"] as? String == "main",
               tabs)
         check("selecting a project lands in that project's room",
               (TB["roomRendered"] as? Bool) == true
               && TB["roomProject"] as? String == TB["id"] as? String, tabs)
-        check("and then there is one tab per agent in the project",
-              tbLanes.count == tbRoster.count
-              && Set(tbLanes) == Set(tbRoster)
-              && tbLanes.first == "main",
-              "lanes=\(tbLanes) roster=\(tbRoster)")
+        // TABS ARE THE ROOM PLUS THE LAUNCHED CLONES — not the access list.
+        // An agent Chancellor has allowed in but never launched has no session,
+        // so a tab for it would be a tab for something that does not exist.
+        check("and then there is one tab per LAUNCHED CLONE, main first",
+              tbLanes == ["main"] + tbClones,
+              "lanes=\(tbLanes) clones=\(tbClones) access=\(tbAccess)")
+        check("an agent with access but no clone gets no tab",
+              Set(tbAccess).subtracting(Set(tbLanes)).isEmpty
+                || Set(tbAccess).subtracting(Set(tbLanes)).allSatisfy { !tbClones.contains($0) },
+              "access=\(tbAccess) lanes=\(tbLanes)")
         let roomIsTab = (try? await web.evaluateJavaScript("S.view === 'sessions'")) as? Bool ?? false
         check("the room is a tab rather than a separate view", roomIsTab)
 
@@ -1140,7 +1155,8 @@ enum Smoke {
             const id = fromUser(() => projectCreate('Smoke Gate Project'))();
             out.made = id;
             out.afterUser = PREFS.projects.length;
-            out.roster = (PREFS.projects.find(p => p.id === id) || {}).roster || [];
+            out.access = (PREFS.projects.find(p => p.id === id) || {}).access || [];
+            out.clones = (PREFS.projects.find(p => p.id === id) || {}).clones || [];
             out.agentCount = LIVE.agents.length;
 
             // Removing is gated the same way, in both directions.
@@ -1167,10 +1183,14 @@ enum Smoke {
               G["afterDirect"] as? Int == gBefore, gate)
         check("DOOR 2: removing a project from outside a user gesture also throws",
               (G["rmThrew"] as? Bool) == true, gate)
-        check("a project HE makes is created, and clones the whole agent set into it",
+        // A NEW PROJECT IS EMPTY BUT FOR ITS ROOM. The previous pass copied every
+        // agent on the gateway into it, which both made the choice for him and
+        // minted a live clone key per agent for a project nobody had said
+        // anything about yet.
+        check("a project HE makes starts with only its room, and nobody launched",
               G["afterUser"] as? Int == gBefore + 1
-              && (G["roster"] as? [String] ?? []).count == (G["agentCount"] as? Int ?? -1)
-              && (G["roster"] as? [String] ?? []).first == "main", gate)
+              && (G["access"] as? [String] ?? []) == ["main"]
+              && (G["clones"] as? [[String: Any]] ?? []).isEmpty, gate)
         check("and removing it, as him, actually removes it",
               G["afterUserRemove"] as? Int == gBefore, gate)
 
@@ -1179,10 +1199,10 @@ enum Smoke {
         // the real Prefs, in Swift, because that is where the door is.
         var smuggled = Prefs.current
         smuggled.projects.append(Prefs.Project(id: "agent-made-this", name: "Smuggled",
-                                               roster: ["main"]))
+                                               access: ["main"]))
         smuggled.projects.append(Prefs.Project(id: "p-shotempty", name: "Empty Project",
-                                               roster: []))
-        smuggled.projects.append(Prefs.Project(id: "p-ok-shape", name: "  ", roster: ["main"]))
+                                               access: []))
+        smuggled.projects.append(Prefs.Project(id: "p-ok-shape", name: "  ", access: ["main"]))
         let cleaned = Prefs.sanitized(smuggled)
         check("DOOR 3: a project id this app could not have minted is dropped on save",
               !cleaned.projects.contains { $0.id == "agent-made-this" },
@@ -1212,11 +1232,13 @@ enum Smoke {
         """
         let migrated = (try? JSONDecoder().decode(Prefs.self, from: Data(v1.utf8)))
             .map { Prefs.sanitized($0) }
+        // THREE, not two: v1's two gateway-adopted projects plus its one tool
+        // tab, which is a project now rather than something deleted on upgrade.
         check("a v1 preference document still decodes rather than resetting his projects",
-              migrated != nil && (migrated?.projects.count ?? 0) == 2,
+              migrated != nil && (migrated?.projects.count ?? 0) == 3,
               "ids=\(migrated?.projects.map { $0.id } ?? [])")
-        check("the migration renames gateway-adopted ids into minted ones",
-              migrated?.projects.map { $0.id } == ["p-bridge", "p-atlas"],
+        check("the migration renames gateway-adopted and tool-tab ids into minted ones",
+              migrated?.projects.map { $0.id } == ["p-bridge", "p-atlas", "p-education"],
               "ids=\(migrated?.projects.map { $0.id } ?? [])")
         check("the migration drops the leaked screenshot project",
               !(migrated?.projects.contains { $0.name == "Empty Project" } ?? true))
@@ -1224,16 +1246,48 @@ enum Smoke {
         // document has no such key rather than that a value is empty.
         let reEncoded = migrated.flatMap { try? JSONEncoder().encode($0) }
             .flatMap { String(data: $0, encoding: .utf8) } ?? ""
-        check("the migrated document is v2 and carries no toolTabs key at all",
-              (migrated?.version ?? 0) == 2 && !reEncoded.contains("toolTabs")
-              && !reEncoded.contains("note"),
+        check("the migrated document is v3 and carries no toolTabs or roster key at all",
+              (migrated?.version ?? 0) == 3 && !reEncoded.contains("toolTabs")
+              && !reEncoded.contains("roster") && !reEncoded.contains("note"),
               reEncoded)
-        check("and it puts main first in every roster it carries over",
-              migrated?.projects.allSatisfy { $0.roster.first == "main" } ?? false,
-              "rosters=\(migrated?.projects.map { $0.roster } ?? [])")
-        check("normalising a roster is idempotent and deduplicates",
-              Prefs.normalisedRoster(["frontend-design", "main", "frontend-design", "main"])
+        check("and it puts main first in every access list it carries over",
+              migrated?.projects.allSatisfy { $0.access.first == "main" } ?? false,
+              "access=\(migrated?.projects.map { $0.access } ?? [])")
+        // THE CORRECTION, ASSERTED AGAINST HIS OWN DOCUMENT'S SHAPE. v1's
+        // `roster` is what he had chosen, so it becomes `access` verbatim — and
+        // it must NOT be widened to every agent, which is what the previous pass
+        // did on load.
+        check("a v1 roster becomes the ACCESS list unchanged, not a full agent set",
+              migrated?.projects.first { $0.id == "p-bridge" }?.access
+                == ["main", "frontend-design"],
+              "bridge=\(migrated?.projects.first { $0.id == "p-bridge" }?.access ?? [])")
+        check("and nothing is launched by a migration: access is not a clone set",
+              migrated?.projects.allSatisfy { $0.clones.isEmpty } ?? false,
+              "clones=\(migrated?.projects.map { $0.clones.count } ?? [])")
+        // A v1 TOOL TAB IS A PROJECT NOW, rather than being deleted. It was a
+        // name plus a chosen set of agents, which is exactly what a project is
+        // under v3, and "Education" was one he had actually built.
+        let edu = migrated?.projects.first { $0.id == "p-education" }
+        check("a v1 tool tab is carried across as a project rather than dropped",
+              edu != nil && edu?.name == "Education"
+              && edu?.access == ["main", "coursework"],
+              "edu=\(String(describing: edu))")
+        check("normalising an access list is idempotent and deduplicates",
+              Prefs.normalisedAccess(["frontend-design", "main", "frontend-design", "main"])
                 == ["main", "frontend-design"])
+        check("normalising an access list always yields main, because the room needs it",
+              Prefs.normalisedAccess([]) == ["main"]
+              && Prefs.normalisedAccess(["frontend-design"]) == ["main", "frontend-design"])
+        check("a clone of an agent without access is dropped on save, so revoking kills it",
+              Prefs.normalisedClones([Prefs.Clone(id: "frontend-design"),
+                                      Prefs.Clone(id: "backend-design")],
+                                     access: ["main", "frontend-design"]).map { $0.id }
+                == ["frontend-design"])
+        check("main is never a clone: its session is the room",
+              Prefs.normalisedClones([Prefs.Clone(id: "main")], access: ["main"]).isEmpty)
+        check("an unknown clone state is stored as active rather than kept as junk",
+              Prefs.normalisedClones([Prefs.Clone(id: "frontend-design", state: "wat")],
+                                     access: ["main", "frontend-design"]).first?.state == "active")
         check("a document that needs no migration is left exactly alone",
               Prefs.sanitized(cleaned) == cleaned)
         web.frame = CGRect(x: 0, y: 0, width: 1440, height: 900)
@@ -1262,7 +1316,8 @@ enum Smoke {
             lanes.map(id=>({id,name:'A fairly long agent label '+id})))});
           window.__bridgeEmit({type:'prefs',path:'/tmp/smoke-prefs.json',prefs:{
             version:2,sshHost:'atlas',inboxRead:[],
-            projects:[{id:'p-many',name:'Many',roster:['main'].concat(lanes)}]}});
+            projects:[{id:'p-many',name:'Many',access:['main'].concat(lanes),
+                      clones:lanes.map(id=>({id,state:'active'}))}]}});
           window.__bridgeEmit({type:'sessions',rows:lanes.map((id,i)=>(
             {key:'agent:'+id+':bridge:p-many',agentId:id,
              label:'A fairly long session label '+i,
@@ -1321,9 +1376,17 @@ enum Smoke {
           window.__bridgeEmit({type:'prefs',path:'/tmp/smoke-prefs.json',prefs:{
             version:2,sshHost:'atlas',inboxRead:['done-old'],
             projects:[{id:'p-bridge',name:'Bridge',
-                       roster:['main','frontend-design','backend-design','coursework','macos-expert']},
+                       access:['main','frontend-design','backend-design','coursework','macos-expert'],
+                       clones:[{id:'frontend-design',state:'active'},
+                               {id:'backend-design',state:'active'},
+                               {id:'coursework',state:'active'},
+                               {id:'macos-expert',state:'active'}]},
                       {id:'p-atlas',name:'Atlas',
-                       roster:['main','frontend-design','backend-design','coursework','macos-expert']}]}});
+                       access:['main','frontend-design','backend-design','coursework','macos-expert'],
+                       clones:[{id:'frontend-design',state:'active'},
+                               {id:'backend-design',state:'active'},
+                               {id:'coursework',state:'active'},
+                               {id:'macos-expert',state:'active'}]}]}});
           // …and the clone sessions with them. `type:'sessions'` is a whole
           // replacement, so the many-tabs fixture wiped these; without them
           // every project is placeholders, `__focusReal` finds no agent pane at
@@ -1449,25 +1512,42 @@ enum Smoke {
         Room.shared.setAgents(roster.map { (id: $0, name: $0) })
         Room.shared.setProjects([
             Prefs.Project(id: pA, name: "Alpha",
-                          roster: ["main", "frontend-design", "backend-design"]),
+                          access: ["main", "frontend-design", "backend-design"],
+                          clones: [Prefs.Clone(id: "frontend-design")]),
             Prefs.Project(id: pB, name: "Beta",
-                          roster: ["main", "frontend-design", "cybersecurity"]),
+                          access: ["main", "frontend-design", "cybersecurity"]),
         ])
 
-        check("a project's roster is the set an agent in it can reach",
-              Room.shared.roster(of: pA) == ["main", "frontend-design", "backend-design"])
-        check("a project nobody made has no roster, so it is unroutable",
-              Room.shared.roster(of: "p-does-not-exist").isEmpty)
+        check("a project's ACCESS LIST is the set an agent in it can reach",
+              Room.shared.access(of: pA) == ["main", "frontend-design", "backend-design"])
+        check("a project nobody made has no access list, so it is unroutable",
+              Room.shared.access(of: "p-does-not-exist").isEmpty)
+        // ACCESS IS NOT THE CLONE SET. This is the assumption the previous pass
+        // made — that a project holds a clone of everything in it — stated as
+        // the thing that must NOT be true.
+        check("access is not the clone set: an agent may be allowed in and not launched",
+              Room.shared.access(of: pA).count == 3
+              && Room.shared.clones(of: pA).map { $0.id } == ["frontend-design"]
+              && !Room.shared.isLaunched("backend-design", project: pA),
+              "access=\(Room.shared.access(of: pA)) clones=\(Room.shared.clones(of: pA).map { $0.id })")
+        check("and the tabs are the room first, then only the launched clones",
+              Room.shared.tabs(of: pA) == ["main", "frontend-design"],
+              "tabs=\(Room.shared.tabs(of: pA))")
+        check("only sessions that exist are subscribed, so an unlaunched agent has no key",
+              Room.shared.keys.contains(Room.key("frontend-design", project: pA))
+              && !Room.shared.keys.contains(Room.key("backend-design", project: pA))
+              && Room.shared.keys.contains(Room.key("main", project: pA)),
+              "keys=\(Room.shared.keys)")
 
         // A PING IS RESOLVED AGAINST THE PROJECT'S ROSTER, NOT THE GATEWAY'S
         // AGENT LIST. `cybersecurity` is a real agent and is in Beta; from
         // inside Alpha it must resolve to nothing at all.
         check("a ping naming a lane outside the project resolves to nothing",
               Room.pings(in: "@cybersecurity can you review this",
-                         agents: Room.shared.roster(of: pA), excluding: "frontend-design").isEmpty)
+                         agents: Room.shared.access(of: pA), excluding: "frontend-design").isEmpty)
         check("and the same ping inside the project that HAS that lane resolves",
               Room.pings(in: "@cybersecurity can you review this",
-                         agents: Room.shared.roster(of: pB),
+                         agents: Room.shared.access(of: pB),
                          excluding: "frontend-design") == ["cybersecurity"])
 
         // …and the enforcement, at the door rather than at the parser: even a
@@ -1501,18 +1581,35 @@ enum Smoke {
               pre.contains("backend-design") && !pre.contains("cybersecurity"), pre)
         check("the preamble states that reach stops at the project boundary",
               pre.contains("ONLY REACH AGENTS IN Alpha"), pre)
-        check("the preamble names the clone's PRIVATE memory file",
-              pre.contains(Room.memoryPath(project: pA, agent: "frontend-design"))
-              && pre.contains("yours alone"), pre)
+        // MEMORY FOLLOWS THE AGENT, NOT THE PROJECT. The previous pass gave each
+        // clone a file scoped to (project, agent), which made the same agent a
+        // different one in every project. These assert the correction directly:
+        // the paths must not contain a project id at all, and the preamble a
+        // clone reads in Alpha must name the same two files as the one it reads
+        // in Beta.
+        check("the preamble names the agent's soul and memory files",
+              pre.contains(Room.soulPath(agent: "frontend-design"))
+              && pre.contains(Room.memoryPath(agent: "frontend-design")), pre)
+        check("and says both are shared by every clone of that agent everywhere",
+              pre.contains("SHARED BY EVERY CLONE OF frontend-design IN EVERY PROJECT"), pre)
+        check("an agent's memory paths carry no project id at all",
+              !Room.memoryPath(agent: "frontend-design").contains(pA)
+              && !Room.memoryPath(agent: "frontend-design").contains(pB)
+              && !Room.soulPath(agent: "frontend-design").contains(pA)
+              && !Room.soulPath(agent: "frontend-design").contains(pB),
+              Room.memoryPath(agent: "frontend-design"))
+        let preB = Room.shared.preamble(for: "frontend-design", project: pB)
+        check("the SAME agent in two projects is told the SAME two memory files",
+              preB.contains(Room.soulPath(agent: "frontend-design"))
+              && preB.contains(Room.memoryPath(agent: "frontend-design")))
+        check("two DIFFERENT agents do not share a memory file",
+              Room.memoryPath(agent: "frontend-design") != Room.memoryPath(agent: "backend-design")
+              && Room.soulPath(agent: "frontend-design") != Room.memoryPath(agent: "frontend-design"))
         check("and the ONE shared memory file every clone in every project uses",
               pre.contains(Room.sharedMemoryPath)
               && pre.contains("shared by every agent in every project"), pre)
-        check("the two memory paths are different files",
-              Room.memoryPath(project: pA, agent: "frontend-design")
-                != Room.memoryPath(project: pB, agent: "frontend-design"))
         check("the shared memory file is the same one from either project",
-              Room.sharedMemoryPath == Room.sharedMemoryPath
-              && !Room.sharedMemoryPath.contains(pA) && !Room.sharedMemoryPath.contains(pB))
+              !Room.sharedMemoryPath.contains(pA) && !Room.sharedMemoryPath.contains(pB))
 
         // Rooms are per project: a transcript, a pause and a rate limit in one
         // say nothing about the other.
@@ -1528,12 +1625,115 @@ enum Smoke {
         // Removing a project takes its room with it. A project recreated under
         // the same name must not inherit a conversation from a previous life.
         Room.shared.setProjects([Prefs.Project(id: pB, name: "Beta",
-                                               roster: ["main", "frontend-design", "cybersecurity"])])
+                                               access: ["main", "frontend-design", "cybersecurity"])])
         check("removing a project drops its room",
               Room.shared.doc(pA).messages.isEmpty && Room.shared.project(pA) == nil,
               "alpha=\(Room.shared.doc(pA).messages.count)")
         check("and leaves the other project's room untouched",
               Room.shared.project(pB) != nil)
+
+        // ---- THE LIFE OF A CLONE ----------------------------------------------
+        //
+        // Access is a permission; a clone is a thing that exists. Launching makes
+        // one, and when a task is finished Chancellor either parks it or ends it.
+        // Both are his decision, so both are asserted to be reachable and to do
+        // different things — and nothing here is asserted to happen on its own,
+        // because nothing does: Bridge never reaps a clone he has not spoken
+        // about.
+        //
+        // The gateway half of `kill` (chat.abort, then sessions.delete) is NOT
+        // exercised here. The socket is not up in this section, and a smoke run
+        // that deletes sessions on his live gateway to prove it can is a worse
+        // trade than leaving one arrow undrawn. What is asserted is everything
+        // Bridge itself decides: the clone set, the tabs, the subscriptions and
+        // the transcript.
+        let pL = "p-smoke-life"
+        Room.shared.setProjects([Prefs.Project(id: pL, name: "Life",
+                                               access: ["main", "frontend-design",
+                                                        "backend-design"])])
+        check("a project starts with nobody launched, however many have access",
+              Room.shared.clones(of: pL).isEmpty && Room.shared.access(of: pL).count == 3
+              && Room.shared.tabs(of: pL) == ["main"],
+              "tabs=\(Room.shared.tabs(of: pL))")
+
+        Room.shared.launch("frontend-design", project: pL)
+        check("launching an agent with access makes a clone, and it is active",
+              Room.shared.cloneState("frontend-design", project: pL) == "active"
+              && Room.shared.tabs(of: pL) == ["main", "frontend-design"],
+              "clones=\(Room.shared.clones(of: pL))")
+        check("and launching it says so in the project's room",
+              (Room.shared.doc(pL).messages.last?.text ?? "").contains("Launched @frontend-design"),
+              Room.shared.doc(pL).messages.last?.text ?? "<none>")
+        check("a launched clone is subscribed; an agent merely allowed in is not",
+              Room.shared.keys.contains(Room.key("frontend-design", project: pL))
+              && !Room.shared.keys.contains(Room.key("backend-design", project: pL)))
+
+        // LAUNCHING IS BOUNDED BY ACCESS. This is the same door `deliver` uses,
+        // checked again here because a launch is the thing that creates the
+        // session — a launch that skipped the check would be a way in that
+        // routing never sees.
+        let outsiderBefore = Room.shared.clones(of: pL).count
+        Room.shared.launch("cybersecurity", project: pL)
+        check("launching an agent WITHOUT access is refused and creates nothing",
+              Room.shared.clones(of: pL).count == outsiderBefore
+              && Room.shared.cloneState("cybersecurity", project: pL) == nil
+              && (Room.shared.doc(pL).messages.last?.text ?? "").contains("has not been given access"),
+              Room.shared.doc(pL).messages.last?.text ?? "<none>")
+
+        // IDLE. Kept, not killed: same clone, same session key, still a tab.
+        Room.shared.setIdle("frontend-design", project: pL)
+        check("idling a clone parks it without removing it",
+              Room.shared.cloneState("frontend-design", project: pL) == "idle"
+              && Room.shared.tabs(of: pL) == ["main", "frontend-design"]
+              && Room.shared.keys.contains(Room.key("frontend-design", project: pL)))
+        check("and it says which of the two things happened, in that project's room",
+              (Room.shared.doc(pL).messages.last?.text ?? "").contains("is idle in Life"),
+              Room.shared.doc(pL).messages.last?.text ?? "<none>")
+
+        // A PING WAKES A PARKED CLONE. "Idle" is a rest state, not a refusal —
+        // otherwise parking a clone would quietly break the room for it.
+        let wake = Room.shared.deliver(to: "frontend-design", project: pL,
+                                       from: "chancellor", text: "back to it", hop: 0)
+        check("delivering to an idle clone wakes it rather than being refused",
+              wake != nil && Room.shared.cloneState("frontend-design", project: pL) == "active")
+
+        // DELIVERY LAUNCHES AN AGENT THAT HAS ACCESS. A teammate handed work by
+        // an @ping must not need a separate click first.
+        let relayed = Room.shared.deliver(to: "backend-design", project: pL,
+                                          from: "frontend-design", text: "your half", hop: 1)
+        check("delivering to an allowed agent that was never launched launches it",
+              relayed != nil
+              && Room.shared.cloneState("backend-design", project: pL) == "active"
+              && Room.shared.tabs(of: pL) == ["main", "frontend-design", "backend-design"],
+              "tabs=\(Room.shared.tabs(of: pL))")
+
+        // KILL. The clone ends; the AGENT does not.
+        Room.shared.kill("backend-design", project: pL)
+        check("killing a clone removes it, its tab and its subscription",
+              Room.shared.cloneState("backend-design", project: pL) == nil
+              && Room.shared.tabs(of: pL) == ["main", "frontend-design"]
+              && !Room.shared.keys.contains(Room.key("backend-design", project: pL)),
+              "tabs=\(Room.shared.tabs(of: pL))")
+        check("killing a clone leaves the agent's ACCESS alone, so it can be launched again",
+              Room.shared.access(of: pL).contains("backend-design"))
+        check("and it says the agent's own memory was not touched",
+              (Room.shared.doc(pL).messages.last?.text ?? "").contains("memory is untouched"),
+              Room.shared.doc(pL).messages.last?.text ?? "<none>")
+        check("a killed clone's high-water mark goes with it, so a relaunch is not deaf",
+              Room.shared.doc(pL).seen[Room.key("backend-design", project: pL)] == nil)
+        Room.shared.launch("backend-design", project: pL)
+        check("and launching it again brings a clone back",
+              Room.shared.cloneState("backend-design", project: pL) == "active")
+
+        // MAIN IS NOT A CLONE AND CANNOT BE ENDED. Its session is the room, so
+        // killing it would mean deleting the project's conversation through a
+        // control that says it is deleting one agent's.
+        Room.shared.kill("main", project: pL)
+        Room.shared.setIdle("main", project: pL)
+        check("main cannot be killed or parked: its session is the room itself",
+              Room.shared.tabs(of: pL).first == "main"
+              && Room.shared.cloneState("main", project: pL) == "active"
+              && !Room.shared.clones(of: pL).contains { $0.id == "main" })
 
         // ---- first sight of a session must not replay its history ------------
         //
@@ -1542,7 +1742,7 @@ enum Smoke {
         // first backfill, pour all 40 into the transcript and re-fire every ping
         // inside them — a relay storm out of history, on launch.
         let pProbe = "p-smoke-probe"
-        Room.shared.setProjects([Prefs.Project(id: pProbe, name: "Probe", roster: roster)])
+        Room.shared.setProjects([Prefs.Project(id: pProbe, name: "Probe", access: roster)])
         // A key no real agent owns, so this reads none of Chancellor's state.
         //
         // The first version of this check used a real room key and passed once,
@@ -1553,7 +1753,8 @@ enum Smoke {
         // that is a bad test, not a bad behaviour, and a unique key is the fix.
         let probeLane = "smoke-\(UUID().uuidString.prefix(8).lowercased())"
         Room.shared.setProjects([Prefs.Project(id: pProbe, name: "Probe",
-                                               roster: roster + [probeLane])])
+                                               access: roster + [probeLane],
+                                               clones: [Prefs.Clone(id: probeLane)])])
         let probeKey = Room.key(probeLane, project: pProbe)
         let history: [[String: Any]] = [
             ["role": "assistant", "content": [["type": "text", "text": "old turn @backend-design"]],
@@ -1588,7 +1789,9 @@ enum Smoke {
         // too high) or replays history on every launch (never seed).
         let freshLane = "smoke-\(UUID().uuidString.prefix(8).lowercased())"
         Room.shared.setProjects([Prefs.Project(id: pProbe, name: "Probe",
-                                               roster: roster + [probeLane, freshLane])])
+                                               access: roster + [probeLane, freshLane],
+                                               clones: [Prefs.Clone(id: probeLane),
+                                                        Prefs.Clone(id: freshLane)])])
         let freshKey = Room.key(freshLane, project: pProbe)
         let midpoint = Room.shared.doc(pProbe).messages.count
         Room.shared.observe(key: freshKey, messages: [])
@@ -1739,11 +1942,16 @@ enum Smoke {
               (RM["hops"] as? [String] ?? []) == ["hop 1", "hop 2"], roomDom)
         // The topbar is the project's page-tabs now — the room plus one per
         // agent — rather than a second copy of the agent strip. Five tabs for
-        // the five-agent fixture roster: room, and four agents after main.
+        // the five-agent fixture: room, and four launched clones after main.
         check("the topbar carries the project's tabs while its room is open",
               (RM["navTabs"] as? Int ?? 0) == 5, roomDom)
-        check("the same control renders in ping mode in the composer",
-              (RM["pingTabs"] as? Int ?? 0) == 4, roomDom)
+        // Five, because the ping bar offers the ACCESS LIST — everyone who may
+        // be handed work here — plus "no ping". Four of the five agents with
+        // access are pingable; main is not, because "no ping" already IS main.
+        // It is deliberately WIDER than the tab strip: pinging an agent that is
+        // allowed in but not launched is what launches it.
+        check("the same control renders in ping mode in the composer, over the access list",
+              (RM["pingTabs"] as? Int ?? 0) == 5, roomDom)
         check("an unpinged message states that it goes to main alone",
               (RM["noteText"] as? String ?? "").contains("main (Thuban) and to nobody else"), roomDom)
 
@@ -2394,10 +2602,9 @@ enum Smoke {
                    || CATEGORIES.find(x => x.kind === 'project' && x.agents.length)
                    || CATEGORIES.find(x => x.kind === 'project');
             if (!c) return false;
-            // No roster rewrite: a project's roster IS its clone set and this
-            // view no longer has a picker to open. It photographs the project as
-            // it really is, on one of its agent tabs rather than its room, since
-            // the room has its own view below.
+            // No access rewrite: this shot photographs the project as it really
+            // is, on one of its agent tabs rather than its room, since the room
+            // has its own view below. The picker has its own shot.
             const real = c.agents.find(a => a.sessionKey && !a.parent && a.kind !== 'room');
             S.view = 'sessions'; S.catId = c.id; S.sub = null;
             if (real) S.tab[c.id] = real.id;
@@ -2494,7 +2701,7 @@ enum Smoke {
             const c = CATEGORIES[0];
             if (!c) return false;
             openProjectRoom(c.id);
-            const ag = (c.roster||[]).find(id=>id!=='main');
+            const ag = (c.access||[]).find(id=>id!=='main');
             if (ag) S.roomPing = ag;
             S.roomDraft = 'Take the CSS side of this and hand it on when you are done.';
             renderAll();

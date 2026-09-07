@@ -30,23 +30,37 @@ import Foundation
 // The page is the only writer, and it sends the whole document each time.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-// VERSION 2 — THE PROJECT IS THE UNIT OF ISOLATION
+// VERSION 3 — ACCESS IS CHANCELLOR'S, AND A CLONE HAS A LIFE
 //
 // v1 had three kinds of sidebar entry (gateway groups, local projects, tool
-// tabs) and a project was a filter over sessions that already existed. v2 has
-// one kind. A project OWNS a full set of agent clones: `frontend-design` in
-// Bridge and `frontend-design` in CalcNotes are two separate gateway sessions
-// under two separate room keys, running at the same time, sharing no state. See
-// Room.swift for the key scheme and the memory layout.
+// tabs) and a project was a filter over sessions that already existed. v2 made
+// the project the unit of isolation but assumed a project holds a clone of
+// EVERY agent — it back-filled every project to the full gateway list and
+// deleted the control that would have let anyone say otherwise.
 //
-// What that means for this file:
+// That assumption was wrong, and Chancellor's own document is the evidence: his
+// Bridge project rostered seven of nine agents and his Atlas project rostered
+// one. v2 would have overwritten both with nine.
 //
-//   * `projects` is the ONLY source of projects. Nothing on the wire creates
-//     one any more — see `sanitized` below and live.js `buildCategories`.
-//   * `toolTabs` is gone. So is `Project.note`, which only ever described an
-//     empty tool tab.
-//   * A project's roster is its clone set. The page fills it with every agent
-//     the gateway reports, `main` first; this file enforces the shape.
+// v3 therefore splits what v2 had conflated into a single `roster` list:
+//
+//   * `access` — WHICH AGENTS CHANCELLOR HAS ALLOWED INTO THIS PROJECT. His
+//     choice, made in the picker, and the boundary `Room.deliver` enforces. An
+//     agent outside it is unreachable from inside this project.
+//   * `clones` — WHICH OF THOSE HAVE ACTUALLY BEEN LAUNCHED HERE, and for each,
+//     whether it is working or parked. A clone is a real gateway session
+//     (`Room.key`); launching one is what brings it into being, and after a task
+//     Chancellor either kills it (session deleted, tab gone) or leaves it IDLE
+//     (session and memory kept, doing nothing). Both are his call, so both are
+//     stored here rather than inferred.
+//
+// `main` is in every project's access list and is never in `clones`: a
+// project's main clone IS its room, it is created with the project, and it is
+// removed only by removing the project.
+//
+// Everything else v2 established still holds: `projects` is the ONLY source of
+// projects, nothing on the wire creates one, and `toolTabs` and `Project.note`
+// are gone.
 // ─────────────────────────────────────────────────────────────────────────────
 
 struct Prefs: Codable, Equatable {
@@ -59,31 +73,112 @@ struct Prefs: Codable, Equatable {
     /// own: the gateway has no notion of "Chancellor has looked at this".
     var inboxRead: [String] = []
 
-    static let currentVersion = 2
+    static let currentVersion = 3
     static let defaultSSHHost = "atlas"
+
+    /// One launched clone: an agent that has been brought into a project as its
+    /// own gateway session.
+    ///
+    /// `state` is deliberately a stored fact rather than something derived from
+    /// whether the session happens to be running right now. "Idle" is a decision
+    /// Chancellor made about a clone he wants to keep — it has to survive a
+    /// relaunch, and it has to be distinguishable from "busy at this instant",
+    /// which the gateway already reports and which nobody needs persisted.
+    struct Clone: Codable, Equatable {
+        /// Working, or ready to. A relayed ping goes through.
+        static let active = "active"
+        /// Parked by hand: session and memory kept, nothing running. A ping
+        /// delivered here wakes it back to `active`.
+        static let idle = "idle"
+
+        var id: String
+        var state: String = Clone.active
+
+        init(id: String, state: String = Clone.active) {
+            self.id = id
+            self.state = state
+        }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            state = (try? c.decode(String.self, forKey: .state)) ?? Clone.active
+        }
+    }
 
     struct Project: Codable, Equatable, Identifiable {
         var id: String
         var name: String
-        /// This project's clone set: one agent id per tab, `main` first. Every
-        /// entry is a real, separate session — see `Room.key(_:project:)`.
-        var roster: [String] = []
+        /// THE AGENTS CHANCELLOR HAS GIVEN ACCESS TO THIS PROJECT. Not the tabs:
+        /// an agent with access that has never been launched has no session and
+        /// no tab. This is the reach boundary — `Room.deliver` refuses anything
+        /// outside it.
+        var access: [String] = []
+        /// The clones actually launched here, in tab order. Never contains
+        /// `main`, whose clone is the room itself.
+        var clones: [Clone] = []
 
-        init(id: String, name: String, roster: [String] = []) {
+        init(id: String, name: String, access: [String] = [], clones: [Clone] = []) {
             self.id = id
             self.name = name
-            self.roster = roster
+            self.access = access
+            self.clones = clones
         }
 
-        /// Explicit, because v1 documents carry a `note` this shape no longer
-        /// has and synthesised Codable does not fall back to property defaults
-        /// for a key that is simply absent.
+        /// Explicit, because v1 and v2 documents carry keys this shape no longer
+        /// has (`note`, `roster`) and synthesised Codable does not fall back to
+        /// property defaults for a key that is simply absent.
+        ///
+        /// `roster` is the v1/v2 spelling of `access` and is read as such. That
+        /// is the whole migration for existing documents, and it is the right
+        /// one: what he had rostered is exactly what he had allowed in. It is
+        /// NOT read as a clone set — v2 never recorded whether an agent had been
+        /// launched, and inventing a live clone for every rostered agent is the
+        /// assumption this version exists to undo.
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             id = try c.decode(String.self, forKey: .id)
             name = (try? c.decode(String.self, forKey: .name)) ?? id
-            roster = (try? c.decode([String].self, forKey: .roster)) ?? []
+            access = (try? c.decode([String].self, forKey: .access))
+                ?? (try? c.decode([String].self, forKey: .roster))
+                ?? []
+            clones = (try? c.decode([Clone].self, forKey: .clones)) ?? []
         }
+
+        /// `roster` is decode-only: it is read from old documents and never
+        /// written back, so an upgraded file stops carrying it.
+        enum CodingKeys: String, CodingKey {
+            case id, name, access, clones, roster
+        }
+
+        func encode(to encoder: Encoder) throws {
+            var c = encoder.container(keyedBy: CodingKeys.self)
+            try c.encode(id, forKey: .id)
+            try c.encode(name, forKey: .name)
+            try c.encode(access, forKey: .access)
+            try c.encode(clones, forKey: .clones)
+        }
+
+        /// The state of one launched clone, or nil when that agent is not
+        /// launched here.
+        func cloneState(_ agentId: String) -> String? {
+            clones.first { $0.id == agentId }?.state
+        }
+    }
+
+    /// `toolTabs` is DECODE-ONLY: read from a v1 document so its tabs can become
+    /// projects, and never written back, so an upgraded file stops carrying it.
+    /// `projects`, `sshHost`, `inboxRead` and `version` are the whole of v3.
+    enum CodingKeys: String, CodingKey {
+        case version, sshHost, projects, inboxRead, toolTabs
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(version, forKey: .version)
+        try c.encode(sshHost, forKey: .sshHost)
+        try c.encode(projects, forKey: .projects)
+        try c.encode(inboxRead, forKey: .inboxRead)
     }
 
     init() {}
@@ -96,6 +191,21 @@ struct Prefs: Codable, Equatable {
         version = (try? c.decode(Int.self, forKey: .version)) ?? 1
         sshHost = (try? c.decode(String.self, forKey: .sshHost)) ?? Prefs.defaultSSHHost
         projects = (try? c.decode([Project].self, forKey: .projects)) ?? []
+        // A v1 TOOL TAB BECOMES A PROJECT rather than being deleted.
+        //
+        // v2 dropped them, which threw away the one Chancellor had actually
+        // built: "Education", holding coursework, main and frontend-design. A
+        // tool tab was a name plus a chosen set of agents, and under v3 that is
+        // precisely what a project is — so the honest migration is to carry it
+        // across, not to decide on his behalf that he is finished with it.
+        // Removing it is one click if he is; recreating it is retyping the name
+        // and re-picking three agents if v2 had its way.
+        //
+        // `sanitized` renames the `tool-` id, exactly as it renames v1's `g-`.
+        for tab in (try? c.decode([Project].self, forKey: .toolTabs)) ?? [] {
+            guard !projects.contains(where: { $0.id == tab.id }) else { continue }
+            projects.append(tab)
+        }
         inboxRead = (try? c.decode([String].self, forKey: .inboxRead)) ?? []
     }
 
@@ -149,13 +259,18 @@ struct Prefs: Codable, Equatable {
         return "\(base)-\(n)"
     }
 
-    /// `main` first, then the order given, deduplicated. Tab order is roster
-    /// order and the room tab is not in the roster — `main` here is the agent,
-    /// not the room. See Room.swift.
-    static func normalisedRoster(_ roster: [String]) -> [String] {
+    /// `main` first, then the order given, deduplicated.
+    ///
+    /// `main` is FORCED IN rather than merely sorted to the front. A project's
+    /// room delivers to its own `main` clone, and `deliver` refuses a target
+    /// outside the access list — so a project without `main` in it is a project
+    /// whose room silently swallows everything Chancellor types. That is not a
+    /// state he should be able to reach by unticking a box, and the picker
+    /// disables the box for the same reason.
+    static func normalisedAccess(_ access: [String]) -> [String] {
         var seen = Set<String>()
         var out: [String] = []
-        for id in roster where !id.isEmpty {
+        for id in access where !id.isEmpty {
             guard !seen.contains(id) else { continue }
             seen.insert(id)
             out.append(id)
@@ -163,6 +278,30 @@ struct Prefs: Codable, Equatable {
         if let i = out.firstIndex(of: "main"), i != 0 {
             out.remove(at: i)
             out.insert("main", at: 0)
+        } else if !seen.contains("main") {
+            out.insert("main", at: 0)
+        }
+        return out
+    }
+
+    /// The launched clones, constrained to what the access list allows.
+    ///
+    /// REVOKING ACCESS KILLS THE CLONE. Dropping a clone whose agent is no
+    /// longer allowed in is not tidying: leaving it would mean an agent that
+    /// Chancellor has just excluded still holds a live session inside the
+    /// project and still appears as a tab, which is the access control failing
+    /// to control anything.
+    ///
+    /// `main` is never a clone — its session is the room.
+    static func normalisedClones(_ clones: [Clone], access: [String]) -> [Clone] {
+        let allowed = Set(access)
+        var seen = Set<String>()
+        var out: [Clone] = []
+        for c in clones where !c.id.isEmpty && c.id != "main" {
+            guard allowed.contains(c.id) else { continue }
+            guard seen.insert(c.id).inserted else { continue }
+            let state = (c.state == Clone.idle) ? Clone.idle : Clone.active
+            out.append(Clone(id: c.id, state: state))
         }
         return out
     }
@@ -181,14 +320,17 @@ struct Prefs: Codable, Equatable {
             // v1 adopted a gateway group as `g-<slug>`. Carry the project, drop
             // the prefix's meaning: rename rather than grandfather.
             if proj.id.hasPrefix("g-") { proj.id = "p-" + proj.id.dropFirst(2) }
+            // v1's tool tabs, carried across as projects — see `init(from:)`.
+            if proj.id.hasPrefix("tool-") { proj.id = "p-" + proj.id.dropFirst(5) }
             guard !Prefs.fixtureProjectIDs.contains(proj.id) else { continue }
             guard Prefs.isValidProjectID(proj.id) else { continue }
             guard !seen.contains(proj.id) else { continue }
             let name = proj.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { continue }
             seen.insert(proj.id)
-            projects.append(Project(id: proj.id, name: name,
-                                    roster: Prefs.normalisedRoster(proj.roster)))
+            let access = Prefs.normalisedAccess(proj.access)
+            projects.append(Project(id: proj.id, name: name, access: access,
+                                    clones: Prefs.normalisedClones(proj.clones, access: access)))
         }
         out.projects = projects
         var readSeen = Set<String>()
