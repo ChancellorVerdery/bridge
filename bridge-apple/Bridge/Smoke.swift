@@ -183,29 +183,74 @@ enum Smoke {
         check("no mock corpus is compiled in", empty == 0, "CATEGORIES.length=\(empty)")
 
         // ---- the bridge actually delivers, and the view shapes it -------------
+        // AN UNCAUGHT RENDER ERROR USED TO BE INVISIBLE HERE.
+        //
+        // `renderAll` builds a view and mounts it; if anything on that path
+        // throws, the DOM keeps the PREVIOUS view and every assertion after it
+        // fails as "the element is missing" — which is true, and says nothing
+        // about the cause. Three separate failures in this suite were one
+        // exception wearing three costumes. Collected here and asserted at the
+        // end, so the suite reports the error rather than its symptoms.
+        _ = try? await web.evaluateJavaScript("""
+          // Tab zero is the room, and a room draws only its own notices — so a
+          // notice addressed to `agents[0]` renders nowhere and every entrance
+          // assertion below would fail for a routing reason rather than an
+          // animation one. These want an ordinary agent pane.
+          window.__firstAgentTab = function () {
+            for (const c of CATEGORIES) {
+              const a = c.agents.find(x => !x.parent && x.kind !== 'room');
+              if (a) { S.view = 'sessions'; S.catId = c.id; S.tab[c.id] = a.id; return a.id; }
+            }
+            return null;
+          };
+          window.__errs = [];
+          window.addEventListener('error', function (e) {
+            window.__errs.push(String((e.error && e.error.stack) || e.message));
+          });
+          true
+        """)
+
+        // A SESSION NO LONGER MAKES A CATEGORY. It appears because a project
+        // rosters its agent and the session is that clone's — so the fixture now
+        // supplies the project too, and the session key is a clone key. This is
+        // the smallest complete shape the app can draw anything from, which is
+        // exactly what this section is for.
         let fixture = """
         window.__bridgeEmit({type:'status',connection:'live',detail:'smoke',readOnly:true,serverVersion:'0.0.0'});
+        window.__bridgeEmit({type:'agents',agents:[{id:'main',name:'Thuban'},{id:'smoke',name:'Smoke'}]});
+        window.__bridgeEmit({type:'prefs',path:'/tmp/smoke-prefs.json',prefs:{
+          version:2,sshHost:'atlas',inboxRead:[],
+          projects:[{id:'p-smoke',name:'Smoke',roster:['main','smoke']}]}});
         window.__bridgeEmit({type:'sessions',rows:[
-          {key:'agent:smoke:one',agentId:'smoke',label:'Smoke session',category:'Smoke',
+          {key:'agent:smoke:bridge:p-smoke',agentId:'smoke',label:'Smoke session',
            status:'running',hasActiveRun:true,model:'claude-opus-5',contextTokens:10,totalTokens:20,
            updatedAt:Date.now(),lastInteractionAt:Date.now(),startedAt:Date.now()-1000,isMain:false}]});
-        window.__bridgeEmit({type:'history',sessionKey:'agent:smoke:one',totalMessages:40,messages:[
+        window.__bridgeEmit({type:'history',sessionKey:'agent:smoke:bridge:p-smoke',totalMessages:40,messages:[
           {role:'user',content:'hello',timestamp:Date.now()-900},
           {role:'assistant',content:[{type:'text',text:'hi'}],timestamp:Date.now()-800},
           // A deliberately tall transcript: the pane must scroll it, not grow to
           // fit it and push the composer off the bottom of the window.
           ...Array.from({length:40},(_, i)=>({role:'assistant',
             content:[{type:'text',text:'line '+i+' '+'x'.repeat(400)}],timestamp:Date.now()-700+i}))]});
+        // Land on the AGENT tab rather than the project's room: everything below
+        // measures a session pane, and tab zero is the room.
+        S.view='sessions'; S.catId='p-smoke'; S.tab['p-smoke']='agent:smoke:bridge:p-smoke';
+        S.sub=null; renderAll();
         true
         """
         _ = try? await web.evaluateJavaScript(fixture)
         try? await Task.sleep(nanoseconds: 400_000_000)
         let cats = (try? await web.evaluateJavaScript("CATEGORIES.length")) as? Int ?? 0
         check("a bridge snapshot becomes a category", cats == 1, "CATEGORIES.length=\(cats)")
+        // Across ALL tabs, not the first one: tab zero is the room now, so
+        // querying `.page-tab` alone would test the room's label and pass or
+        // fail for a reason that has nothing to do with sessions.
         let tabText = (try? await web.evaluateJavaScript(
-            "document.querySelector('.page-tab') ? document.querySelector('.page-tab').textContent : ''")) as? String ?? ""
+            "[...document.querySelectorAll('.page-tab')].map(t => t.textContent).join(' | ')")) as? String ?? ""
         check("the session is drawn as a tab, labelled by its gateway label",
-              tabText.contains("Smoke session"), "tab=\(tabText)")
+              tabText.contains("Smoke session"), "tabs=\(tabText)")
+        check("and the project's room is the tab before it",
+              tabText.hasPrefix("Smoke · room"), "tabs=\(tabText)")
         let txt = (try? await web.evaluateJavaScript(
             "document.querySelector('.tx') ? document.querySelector('.tx').textContent : ''")) as? String ?? ""
         check("the transcript renders both messages", txt.contains("hello") && txt.contains("hi"))
@@ -233,7 +278,7 @@ enum Smoke {
         // ENTER_HOLD_MS — so this asks about the hold and nothing else. A
         // sleep-based version would be asking about the clock instead.
         let holdJSON = (try? await web.evaluateJavaScript(
-            "S.notice={k:'info',agentId:CATEGORIES[0].agents[0].id,text:'hold'};"
+            "S.notice={k:'info',agentId:__firstAgentTab(),text:'hold'};"
             + " renderAll();"
             + " var a=document.querySelectorAll('.notice.is-enter').length;"
             + " renderAll();"
@@ -285,7 +330,7 @@ enum Smoke {
         // than the fixed sleep it replaced — once a tick eats the key, no later
         // sample can ever see it.
         let reappear = (try? await web.evaluateJavaScript(
-            "S.notice={k:'warn',agentId:CATEGORIES[0].agents[0].id,text:'smoke'};"
+            "S.notice={k:'warn',agentId:__firstAgentTab(),text:'smoke'};"
             + " renderAll();"
             + " document.querySelectorAll('.notice.is-enter').length")) as? Int ?? -3
         // On failure, say what the page actually held: a bare count cannot tell
@@ -346,10 +391,11 @@ enum Smoke {
 
         // Preferences: the store is Swift's, and a round-trip through it is the
         // only proof that "persists across launches" is true rather than hoped.
-        let probe = Prefs(version: 1, sshHost: "smoke-host",
-                          projects: [Prefs.Project(id: "p-smoke", name: "Smoke Project",
-                                                   roster: ["main", "frontend-design"], note: "")],
-                          toolTabs: Prefs.defaultToolTabs, inboxRead: ["t-read"])
+        var probe = Prefs()
+        probe.sshHost = "smoke-host"
+        probe.projects = [Prefs.Project(id: "p-smoke", name: "Smoke Project",
+                                        roster: ["main", "frontend-design"])]
+        probe.inboxRead = ["t-read"]
         let before = Prefs.current
         check("prefs save reports success", Prefs.save(probe))
         // Re-read from DISK, not from the in-process cache: a cache that never
@@ -376,9 +422,9 @@ enum Smoke {
         let realPrefsDir = Prefs.directoryOverride
         let known = Prefs.current
         Prefs.directoryOverride = URL(fileURLWithPath: "/dev/null/not-a-directory")
-        let poison = Prefs(version: 1, sshHost: "never-written",
-                           projects: [Prefs.Project(id: "p-lost", name: "Lost", roster: [], note: "")],
-                           toolTabs: [], inboxRead: [])
+        var poison = Prefs()
+        poison.sshHost = "never-written"
+        poison.projects = [Prefs.Project(id: "p-lost", name: "Lost", roster: [])]
         let saved = Prefs.save(poison)
         Prefs.directoryOverride = realPrefsDir
         check("a prefs save that cannot write reports failure", !saved)
@@ -431,10 +477,10 @@ enum Smoke {
         // prefs.json when this pass started, left there by a screenshot run.
         let shotSnapshot = Prefs.current
         var polluted = shotSnapshot
-        polluted.projects.append(Prefs.Project(id: "p-shotempty-check", name: "Empty Project",
-                                               roster: [], note: ""))
+        polluted.projects.append(Prefs.Project(id: "p-shotempty-fixture", name: "Empty Project",
+                                               roster: []))
         check("a shot view can write into the real preference document",
-              Prefs.save(polluted) && Prefs.current.projects.contains { $0.id == "p-shotempty-check" })
+              Prefs.save(polluted) && Prefs.current.projects.contains { $0.id == "p-shotempty-fixture" })
         check("and the shot restore puts it back, on disk and in memory",
               Smoke.restoreShotPrefs(shotSnapshot) && Prefs.current == shotSnapshot,
               "projects=\(Prefs.current.projects.map { $0.id })")
@@ -458,11 +504,39 @@ enum Smoke {
           {id:'macos-expert',name:'macOS Expert'}]});
         window.__bridgeEmit({type:'groups',groups:[{name:'Bridge',position:0}]});
         window.__bridgeEmit({type:'prefs',path:'/tmp/prefs.json',tokenPresent:true,prefs:{
-          version:1,sshHost:'atlas',inboxRead:['done-old'],
-          projects:[{id:'g-bridge',name:'Bridge',roster:['frontend-design','backend-design'],note:''}],
-          toolTabs:[{id:'tool-education',name:'Education',
-                     roster:['coursework','main','frontend-design'],
-                     note:'Nothing inside Education is built yet.'}]}});
+          version:2,sshHost:'atlas',inboxRead:['done-old'],
+          projects:[{id:'p-bridge',name:'Bridge',
+                     roster:['main','frontend-design','backend-design','coursework','macos-expert']},
+                    {id:'p-atlas',name:'Atlas',
+                     roster:['main','frontend-design','backend-design','coursework','macos-expert']}]}});
+        // Real clone sessions, so the projects are not made entirely of
+        // placeholders. The keys are `agent:<id>:bridge:<projectId>` because
+        // that is the only way a session belongs to a project now.
+        window.__bridgeEmit({type:'sessions',rows:[
+          {key:'agent:main:bridge:p-bridge',agentId:'main',label:'Bridge · main',
+           status:'idle',model:'claude-opus-5',contextTokens:120,totalTokens:900,
+           updatedAt:Date.now(),lastInteractionAt:Date.now(),startedAt:Date.now()-9000,isMain:true},
+          {key:'agent:frontend-design:bridge:p-bridge',agentId:'frontend-design',
+           label:'Bridge · frontend',status:'running',hasActiveRun:true,model:'claude-opus-5',
+           contextTokens:340,totalTokens:5200,
+           updatedAt:Date.now(),lastInteractionAt:Date.now(),startedAt:Date.now()-4000,isMain:false},
+          {key:'agent:backend-design:bridge:p-atlas',agentId:'backend-design',
+           label:'Atlas · backend',status:'completed',model:'claude-sonnet-5',
+           contextTokens:80,totalTokens:410,
+           updatedAt:Date.now(),lastInteractionAt:Date.now(),startedAt:Date.now()-8000,isMain:false}]});
+        // The child session the completed inbox task names. Emitted here so the
+        // summary-provenance checks below do not depend on a fixture in another
+        // section keeping its session key.
+        window.__bridgeEmit({type:'history',sessionKey:'agent:smoke:one',totalMessages:3,messages:[
+          {role:'user',content:'build phase A',timestamp:Date.now()-3000},
+          {role:'assistant',content:[{type:'text',text:'I will start by reading the protocol.'}],
+           timestamp:Date.now()-2000},
+          {role:'assistant',content:[{type:'text',text:'Done: the native app is built, signed and running against the live gateway.'}],
+           timestamp:Date.now()-1000}]});
+        window.__bridgeEmit({type:'history',sessionKey:'agent:frontend-design:bridge:p-bridge',
+          totalMessages:2,messages:[
+          {role:'user',content:'take the composer',timestamp:Date.now()-900},
+          {role:'assistant',content:[{type:'text',text:'on it'}],timestamp:Date.now()-800}]});
         window.__bridgeEmit({type:'tasks',replace:true,tasks:[
           // a whole delegated task that finished -> ONE entry
           {id:'done-new',kind:'subagent',status:'completed',title:'Phase A — native Mac app',
@@ -580,15 +654,19 @@ enum Smoke {
               (L["real"] as? Int ?? 0) > 0, landing)
 
         // ---- roster ------------------------------------------------------------
-        _ = try? await web.evaluateJavaScript("selectCat('g-bridge'); true")
+        _ = try? await web.evaluateJavaScript("selectCat('p-bridge'); true")
         try? await Task.sleep(nanoseconds: 250_000_000)
         let rost = (try? await web.evaluateJavaScript("""
           JSON.stringify({ tabs: [...document.querySelectorAll('.page-tab')].map(t => t.textContent),
-            lanes: catById('g-bridge').agents.map(a => a.lane) })
+            lanes: catById('p-bridge').agents.map(a => a.lane) })
         """)) as? String ?? "{}"
         let R = (try? JSONSerialization.jsonObject(with: Data(rost.utf8))) as? [String: Any] ?? [:]
         let lanes = R["lanes"] as? [String] ?? []
-        check("a roster picks which agents get tabs", lanes == ["frontend-design", "backend-design"], rost)
+        // The picker is gone: a project holds every agent, so what is asserted
+        // is the ORDER — main first, because main's tab is the room.
+        check("a project's tabs are main first, then one per agent",
+              lanes.first == "main" && Set(lanes) == Set(["main", "frontend-design",
+                "backend-design", "coursework", "macos-expert"]), rost)
 
         // Breadcrumbs. Phase A had two category kinds; Phase B has three, and the
         // old ternary filed the Education tool tab under "Agents".
@@ -599,14 +677,16 @@ enum Smoke {
               selectCat(c.id);
               out[c.kind] = (document.getElementById('crumb').textContent || '').split(' / ')[1] || '';
             }
-            selectCat('g-bridge');
+            selectCat('p-bridge');
             return JSON.stringify(out);
           })()
         """)) as? String ?? "{}"
         let CR = (try? JSONSerialization.jsonObject(with: Data(crumbs.utf8))) as? [String: Any] ?? [:]
-        check("a tool tab is not filed under Agents in the breadcrumb",
-              (CR["tool"] as? String ?? "") == "Tools", crumbs)
-        check("a project is filed under Projects", (CR["project"] as? String ?? "") == "Projects", crumbs)
+        // One kind of category, so the breadcrumb is a constant. The old bug —
+        // a ternary that filed the Education tool tab under "Agents" — is not
+        // reachable because neither of those things exists.
+        check("every breadcrumb says Projects, because that is all there is",
+              CR.count == 1 && (CR["project"] as? String ?? "") == "Projects", crumbs)
 
         // ---- ping bubbles ------------------------------------------------------
         // The requirement is the SAME control, not a lookalike: the selected
@@ -647,11 +727,17 @@ enum Smoke {
           // Focus a tab that actually has a session behind it. A rostered
           // placeholder has no sessionKey, and the composer for one correctly
           // refuses before the wire — which is not the state under test.
+          //
+          // AND NOT THE ROOM. Tab zero carries a sessionKey too (this project's
+          // main clone) but renders a room: no agent composer, no context strip,
+          // no `S.draft`. Focusing it silently measured the wrong pane and every
+          // send, refusal and settings assertion downstream failed for that one
+          // reason rather than for anything they were written to catch.
           window.__focusReal = function () {
             for (const c of CATEGORIES) {
-              const a = c.agents.find(x => x.sessionKey && !x.parent);
+              const a = c.agents.find(x => x.sessionKey && !x.parent && x.kind !== 'room');
               if (!a) continue;
-              S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null; S.customize=null;
+              S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null;
               renderAll();
               return a.id;
             }
@@ -694,7 +780,11 @@ enum Smoke {
               (F["draftKept"] as? Bool ?? false), refusal)
 
         // ---- settings ----------------------------------------------------------
-        _ = try? await web.evaluateJavaScript("openSettings(); true")
+        let setOpen = (try? await web.evaluateJavaScript(
+            "(function(){ try { openSettings(); return 'ok'; }"
+            + " catch (e) { return 'THREW ' + (e && (e.stack || e.message) || e); } })()"))
+            as? String ?? "<nil>"
+        check("opening settings does not throw", setOpen == "ok", setOpen)
         try? await Task.sleep(nanoseconds: 250_000_000)
         let setDom = (try? await web.evaluateJavaScript("""
           JSON.stringify({ sections: document.querySelectorAll('.set-s').length,
@@ -916,168 +1006,236 @@ enum Smoke {
         // Chancellor's prefs.json has changed the app it was measuring.
         let prefsBeforePicker = Prefs.current
 
-        // ---- THE FIFTH COLLAPSE, AS A UNIT ASSERTION ---------------------------
+        // ---- THE SIDEBAR, EXACTLY ---------------------------------------------
         //
-        // The roster-picker collapse (§ the pass-1 night note) had a runtime
-        // guard in `shot()` and nothing here, because no fixture opened the
-        // picker. A bug that has shipped five times deserves a check that runs
-        // on `build.sh smoke`, not one that runs only when somebody remembers to
-        // take a screenshot.
-        //
-        // The fixture is `Smoke.views["project"]` ITSELF — the same string
-        // `--shot --view project` runs, not a paraphrase of it. A second copy
-        // would drift, and a drifted copy of a regression test is worse than
-        // none: it goes green against a view nobody ships.
-        //
-        // And it runs at THREE viewport heights, because the fix is `18vh` and
-        // the whole previous pass could only measure it at 1000px. A vh cap is
-        // correct by construction at every height and that is exactly the kind
-        // of claim that turns out to have a floor under it — 18vh of 700px is
-        // 126px, which is under the panel's own 92px min-height plus its
-        // padding, so the two rules meet somewhere and this is where that gets
-        // found rather than asserted.
-        for h in [1200, 1000, 900, 760] {
-            web.frame = CGRect(x: 0, y: 0, width: 1440, height: h)
-            web.layoutSubtreeIfNeeded()
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            // NOT `views["project"]` verbatim, and the reason is worth writing
-            // down. That fixture picks the first project-kind category with any
-            // agents in it, and an agent can be a ROSTERED PLACEHOLDER with no
-            // sessionKey — which renders a plan, not a transcript, so there is
-            // no `.tx` and no `.foot` to measure and every assertion below would
-            // pass on a pane that does not exist. `__focusReal` is the existing
-            // answer to exactly that (it is why the `sessions` geometry check
-            // calls it), so the picker is opened on the category it lands in.
-            // Same layout, same two subtrees, same `data-cust` — reached by a
-            // route that cannot silently measure nothing.
-            let opened = (try? await web.evaluateJavaScript("""
-              (function(){
-                const id = window.__focusReal();
-                if (!id) return false;
-                S.customize = S.catId;
-                renderAll();
-                return !!document.querySelector('.cust') && !!document.querySelector('.foot');
-              })()
-            """)) as? Bool ?? false
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            let cm = (try? await web.evaluateJavaScript(Smoke.measureJS)) as? String ?? "{}"
-            let C = (try? JSONSerialization.jsonObject(with: Data(cm.utf8))) as? [String: Any] ?? [:]
-            let vp = (C["viewport"] as? [Int])?.last ?? 0
-            let txh = C["tx"] as? Int ?? -1
-            let footH = C["footH"] as? Int ?? -1
-            let custH = C["custH"] as? Int ?? -1
-            let scrolls = C["footScrolls"] as? Bool ?? false
-            let fb = C["footBottom"] as? Int ?? -1
-            check("picker@\(h): the fixture actually opened the roster picker",
-                  opened && custH > 0, "opened=\(opened) custH=\(custH) " + cm)
-            check("picker@\(h): the viewport really is \(h)px", vp == h, "viewport=\(vp)")
-            check("picker@\(h): the transcript keeps its 200px floor", txh >= 200,
-                  "tx=\(txh) cust=\(custH) " + cm)
-            // THE ASSERTION THE FIFTH COLLAPSE WOULD HAVE FAILED. tx was 200 and
-            // footBottom was inside the window — both old checks passed — while
-            // .foot scrolled its own 380px of content inside 117px. "Crushed"
-            // means the send button is behind an inner scrollbar, and this is
-            // that, not a proxy for it.
-            // THE MEASURED MINIMUM, and why 760 is asserted differently.
-            //
-            // The composer's rows at 1440 wide, with a refusal banner up:
-            //   foot-h:13 cmds:22 ping-wrap:46 compose-box:45 wr:157(now capped
-            //   to 84) note:18 p-use:29 p-use-2:13
-            // and the height available to it is almost exactly contentH - 406.
-            // So the pane needs about 740px of content height — a ~960px window
-            // — to hold a floored transcript and an uncrushed composer at this
-            // width. 1200, 1000 and 900 are at or above that once `.wr` is
-            // capped; 760 is 140px below it and no arrangement of these boxes
-            // fits there. That is a LIMIT, and it is asserted as one: nothing
-            // may escape the window, and the debt is printed rather than
-            // rounded away. Asserting !scrolls at 760 would mean either a false
-            // green or deleting a control, and both are worse than a number.
-            let natural = C["footNatural"] as? Int ?? -1
-            let debt = "foot=\(footH) natural=\(natural) short=\(natural - footH) "
-                     + "rows=[\(C["footRows"] as? String ?? "")] " + cm
-            if h >= 900 {
-                check("picker@\(h): the composer does not scroll its own content", !scrolls, debt)
-            } else {
-                check("picker@\(h): below the pane's minimum height, nothing escapes the window",
-                      fb > 0 && fb <= vp + 2 && txh >= 200, debt)
-                print("     note: \(h)px is under this pane's ~960px minimum — composer short by "
-                      + "\(max(0, natural - footH))px, by design rather than unnoticed")
-            }
-            check("picker@\(h): the composer stays inside the window", fb > 0 && fb <= vp + 2, cm)
-            // The cap is doing its job rather than being inert — the failure mode
-            // of the `%` max-height tried in §9C was that it resolved to nothing
-            // at all and the layout was rescued by something else. A cap that
-            // never binds is a cap nobody can trust at a height they did not try.
-            // The 18vh cap went with the flow layout. What replaces it is the
-            // overlay's own bound: it may not grow past the work area it floats
-            // over, or it is a panel running off the bottom of the window.
-            check("picker@\(h): the overlay stays inside its work area", custH > 0 && custH <= h,
-                  "cust=\(custH) " + cm)
-            // And the send button is not merely inside .foot but VISIBLE in it:
-            // the geometry above is about boxes, and this is about the control.
-            let sendVisible = (try? await web.evaluateJavaScript("""
-              (function(){
-                const f=document.querySelector('.foot'), b=document.querySelector('.foot .send');
-                if(!f||!b) return false;
-                const fr=f.getBoundingClientRect(), br=b.getBoundingClientRect();
-                return br.bottom <= fr.bottom + 1 && br.top >= fr.top - 1
-                       && br.height > 0 && br.bottom <= window.innerHeight + 1;
-              })()
-            """)) as? Bool ?? false
-            check("picker@\(h): the SEND button is on screen with the picker open", sendVisible, cm)
-
-            // With the picker out of the flow the composer stops paying for it,
-            // so the prose it used to shed — the slash chips, the star-topology
-            // caption, the queue warning — is on screen at every size. The
-            // queue warning is the single most important sentence in this UI and
-            // it was being deleted to buy 36px for a panel that is no longer in
-            // the column; this asserts that deletion is undone rather than
-            // trusting the comment that says so.
-            let proseShown = (try? await web.evaluateJavaScript(
-                "!!document.querySelector('.work[data-cust=\"1\"] .foot .note')"
-                + " && document.querySelector('.work[data-cust=\"1\"] .foot .note')"
-                + "     .getBoundingClientRect().height > 0")) as? Bool ?? false
-            check("picker@\(h): the composer keeps its prose with the picker open",
-                  proseShown, "proseShown=\(proseShown) " + cm)
-            // And the picker really is an OVERLAY, not merely capped smaller.
-            // Every geometry number above would look identical if the fix had
-            // been another constant, so the mechanism is asserted directly.
-            let overlaid = (try? await web.evaluateJavaScript(
-                "getComputedStyle(document.querySelector('.cust')).position === 'absolute'"))
-                as? Bool ?? false
-            check("picker@\(h): the picker is out of the flow", overlaid, cm)
-        }
-
-        // The picker in the view that has NO composer must NOT be capped: the
-        // cap exists to stop a picker eating a composer, and an empty project
-        // has no composer to eat. An unconditional 18vh put that panel's "New
-        // agent…" row and its explanatory paragraph behind a scrollbar with
-        // ~600px of empty work area beneath it — a cost paid by the one view
-        // that was never in danger. `.work[data-cust]` scopes it; this is the
-        // assertion that keeps it scoped.
-        web.frame = CGRect(x: 0, y: 0, width: 1440, height: 1000)
-        web.layoutSubtreeIfNeeded()
-        let emptyPick = (try? await web.evaluateJavaScript(Smoke.views["emptyproject"] ?? "false")) as? Bool ?? false
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        let ep = (try? await web.evaluateJavaScript("""
+        // The roster-picker geometry assertions that used to live here are gone
+        // with the picker itself — a project holds a full clone set by
+        // definition, so there is nothing to pick. What replaces them is the
+        // structure the picker used to sit inside, asserted directly, because
+        // "the sidebar has no Room entry" is the kind of claim that is true the
+        // day it is written and quietly false four passes later.
+        let sidebar = (try? await web.evaluateJavaScript("""
           (function(){
-            const n=document.querySelector('.cust'), w=document.querySelector('.work');
-            if(!n) return JSON.stringify({cust:-1});
-            return JSON.stringify({ cust: Math.round(n.getBoundingClientRect().height),
-              scrolls: n.scrollHeight > n.clientHeight + 4,
-              hasFoot: !!document.querySelector('.foot'),
-              dataCust: w ? w.getAttribute('data-cust') : null,
-              natural: n.scrollHeight });
+            renderAll();
+            const nav = document.getElementById('nav');
+            const heads = [...nav.querySelectorAll('.nav__head')].map(n => n.textContent.trim());
+            const labels = [...nav.querySelectorAll('.nav__label')].map(n => n.textContent.trim());
+            return JSON.stringify({
+              heads, labels,
+              sections: NAV_SECTIONS.map(s => s.title),
+              addButtons: [...nav.querySelectorAll('.nav__add')].map(n => n.textContent.trim()),
+              removeButtons: nav.querySelectorAll('.nav__rm-b').length,
+              projects: PREFS.projects.map(p => p.id),
+              kinds: [...new Set(CATEGORIES.map(c => c.kind))],
+            });
           })()
         """)) as? String ?? "{}"
-        let EP = (try? JSONSerialization.jsonObject(with: Data(ep.utf8))) as? [String: Any] ?? [:]
-        check("empty project: the fixture opened its picker", emptyPick && (EP["cust"] as? Int ?? -1) > 0, ep)
-        check("empty project: there is no composer competing for the column",
-              (EP["hasFoot"] as? Bool) == false, ep)
-        check("empty project: the picker is NOT capped where nothing competes",
-              (EP["scrolls"] as? Bool) == false && (EP["cust"] as? Int ?? 0) > 180, ep)
-        check("empty project: and the cap is off because data-cust is absent, not because it is 0",
-              EP["dataCust"] is NSNull || EP["dataCust"] == nil, ep)
+        let SB = (try? JSONSerialization.jsonObject(with: Data(sidebar.utf8))) as? [String: Any] ?? [:]
+        let sbHeads = SB["heads"] as? [String] ?? []
+        let sbLabels = SB["labels"] as? [String] ?? []
+        let sbSections = SB["sections"] as? [String] ?? []
+
+        check("the sidebar's only section is Projects",
+              sbSections == ["Projects"] && sbHeads == ["Projects"], sidebar)
+        // The two entries he named explicitly. Both were in the sidebar before
+        // this pass and both had to go.
+        check("there is NO Room entry in the sidebar",
+              !sbLabels.contains("Room"), sidebar)
+        check("there is NO top-level agent list",
+              !sbHeads.contains("Agents")
+              && !sbLabels.contains("Frontend Design")
+              && !sbLabels.contains("Backend Design")
+              && !sbLabels.contains("Full Stack"), sidebar)
+        check("and no Tools section either — a tool tab is not a project",
+              !sbHeads.contains("Tools") && !sbLabels.contains("Education"), sidebar)
+        check("every category in the sidebar is a project",
+              (SB["kinds"] as? [String] ?? []) == ["project"], sidebar)
+        check("the Inbox is above the sections rather than inside one",
+              sbLabels.first == "Inbox", sidebar)
+
+        // ADD AND REMOVE. There was no way to remove a project at all — the gap
+        // he called out — so the control's existence is asserted, not just its
+        // effect.
+        check("there is a working control to ADD a project",
+              (SB["addButtons"] as? [String] ?? []).contains { $0.contains("New project") }, sidebar)
+        check("and one to REMOVE each project, which did not exist before",
+              (SB["removeButtons"] as? Int ?? 0) == (SB["projects"] as? [String] ?? []).count
+              && (SB["removeButtons"] as? Int ?? 0) > 0, sidebar)
+
+        // ---- main FIRST, then one tab per agent -------------------------------
+        let tabs = (try? await web.evaluateJavaScript("""
+          (function(){
+            const c = CATEGORIES[0];
+            if (!c) return JSON.stringify({});
+            // Forget any remembered tab first. `selectCat` deliberately returns
+            // you to the tab you were last on in that project; what is asserted
+            // here is where a project you have NOT been inside opens.
+            delete S.tab[c.id];
+            S.view='sessions'; S.sub=null; selectCat(c.id);
+            const strip = [...document.querySelectorAll('#page-tabs .page-tab')]
+              .map(n => n.getAttribute('data-id'));
+            const tabsInOrder = c.agents.filter(a => !a.parent);
+            return JSON.stringify({
+              id: c.id,
+              first: tabsInOrder[0] ? tabsInOrder[0].id : null,
+              firstKind: tabsInOrder[0] ? (tabsInOrder[0].kind || 'agent') : null,
+              firstLane: tabsInOrder[0] ? tabsInOrder[0].lane : null,
+              lanes: tabsInOrder.map(a => a.lane),
+              roster: c.roster,
+              strip,
+              roomRendered: !!document.querySelector('.pane.room'),
+              roomProject: (document.querySelector('.pane.room')||{getAttribute:()=>null})
+                             .getAttribute('data-project'),
+            });
+          })()
+        """)) as? String ?? "{}"
+        let TB = (try? JSONSerialization.jsonObject(with: Data(tabs.utf8))) as? [String: Any] ?? [:]
+        let tbLanes = TB["lanes"] as? [String] ?? []
+        let tbRoster = TB["roster"] as? [String] ?? []
+        check("a project's FIRST tab is main, and it is the room",
+              TB["firstKind"] as? String == "room" && TB["firstLane"] as? String == "main",
+              tabs)
+        check("selecting a project lands in that project's room",
+              (TB["roomRendered"] as? Bool) == true
+              && TB["roomProject"] as? String == TB["id"] as? String, tabs)
+        check("and then there is one tab per agent in the project",
+              tbLanes.count == tbRoster.count
+              && Set(tbLanes) == Set(tbRoster)
+              && tbLanes.first == "main",
+              "lanes=\(tbLanes) roster=\(tbRoster)")
+        let roomIsTab = (try? await web.evaluateJavaScript("S.view === 'sessions'")) as? Bool ?? false
+        check("the room is a tab rather than a separate view", roomIsTab)
+
+        // ---- AGENTS CANNOT CREATE PROJECTS ------------------------------------
+        //
+        // Enforced in code at three doors, and each one is asserted. A rule this
+        // shape is exactly the sort that decays into a comment, and the two
+        // projects he never made — "Diagnostics" (a gateway group) and "Empty
+        // Project" (a screenshot fixture) — are what that decay looked like.
+        let gate = (try? await web.evaluateJavaScript("""
+          (function(){
+            const before = PREFS.projects.length;
+            const out = { before };
+
+            // DOOR 1 — provenance. A gateway group, and a session carrying a
+            // category, are the two paths anything on the wire ever had. Both
+            // used to mint a project on sight.
+            window.__bridgeEmit({type:'groups',groups:[
+              {name:'Diagnostics',position:0},{name:'Invented By An Agent',position:1}]});
+            window.__bridgeEmit({type:'sessions',rows:[
+              {key:'agent:smoke:gate',agentId:'smoke',label:'x',category:'Smuggled',
+               status:'idle',updatedAt:Date.now(),lastInteractionAt:Date.now(),isMain:false}]});
+            buildCategories();
+            out.afterWire = PREFS.projects.length;
+            out.catIds = CATEGORIES.map(c => c.id);
+
+            // DOOR 2 — intent. Calling the mutator from anywhere that is not a
+            // DOM handler throws rather than quietly working.
+            try { projectCreate('Smuggled By An Agent'); out.threw = false; }
+            catch (e) { out.threw = true; out.msg = String(e.message || e); }
+            out.afterDirect = PREFS.projects.length;
+
+            // …and the same call WITH intent works, so the gate is a gate and
+            // not a wall.
+            const id = fromUser(() => projectCreate('Smoke Gate Project'))();
+            out.made = id;
+            out.afterUser = PREFS.projects.length;
+            out.roster = (PREFS.projects.find(p => p.id === id) || {}).roster || [];
+            out.agentCount = LIVE.agents.length;
+
+            // Removing is gated the same way, in both directions.
+            try { projectRemove(id); out.rmThrew = false; }
+            catch (e) { out.rmThrew = true; }
+            out.afterDirectRemove = PREFS.projects.length;
+            fromUser(() => projectRemove(id))();
+            out.afterUserRemove = PREFS.projects.length;
+            return JSON.stringify(out);
+          })()
+        """)) as? String ?? "{}"
+        let G = (try? JSONSerialization.jsonObject(with: Data(gate.utf8))) as? [String: Any] ?? [:]
+        let gBefore = G["before"] as? Int ?? -1
+        check("DOOR 1: a gateway session group does not become a project",
+              G["afterWire"] as? Int == gBefore, gate)
+        check("DOOR 1: and neither does a session carrying a category nobody made",
+              !((G["catIds"] as? [String] ?? []).contains { $0.contains("diagnostics")
+                                                          || $0.contains("smuggled")
+                                                          || $0.contains("invented") }), gate)
+        check("DOOR 2: creating a project from outside a user gesture THROWS",
+              (G["threw"] as? Bool) == true
+              && (G["msg"] as? String ?? "").contains("not by anything on the gateway"), gate)
+        check("DOOR 2: and it changes nothing when it does",
+              G["afterDirect"] as? Int == gBefore, gate)
+        check("DOOR 2: removing a project from outside a user gesture also throws",
+              (G["rmThrew"] as? Bool) == true, gate)
+        check("a project HE makes is created, and clones the whole agent set into it",
+              G["afterUser"] as? Int == gBefore + 1
+              && (G["roster"] as? [String] ?? []).count == (G["agentCount"] as? Int ?? -1)
+              && (G["roster"] as? [String] ?? []).first == "main", gate)
+        check("and removing it, as him, actually removes it",
+              G["afterUserRemove"] as? Int == gBefore, gate)
+
+        // DOOR 3 — the store. Whatever the page sends, what lands on disk is a
+        // document whose projects all have ids this app mints. Asserted against
+        // the real Prefs, in Swift, because that is where the door is.
+        var smuggled = Prefs.current
+        smuggled.projects.append(Prefs.Project(id: "agent-made-this", name: "Smuggled",
+                                               roster: ["main"]))
+        smuggled.projects.append(Prefs.Project(id: "p-shotempty", name: "Empty Project",
+                                               roster: []))
+        smuggled.projects.append(Prefs.Project(id: "p-ok-shape", name: "  ", roster: ["main"]))
+        let cleaned = Prefs.sanitized(smuggled)
+        check("DOOR 3: a project id this app could not have minted is dropped on save",
+              !cleaned.projects.contains { $0.id == "agent-made-this" },
+              "ids=\(cleaned.projects.map { $0.id })")
+        check("DOOR 3: and so is the screenshot fixture that was in his real sidebar",
+              !cleaned.projects.contains { $0.id == "p-shotempty" },
+              "ids=\(cleaned.projects.map { $0.id })")
+        check("DOOR 3: and a project with no name, which nothing could label",
+              !cleaned.projects.contains { $0.id == "p-ok-shape" },
+              "ids=\(cleaned.projects.map { $0.id })")
+        check("a valid project id is accepted, so door 3 is a filter and not a wall",
+              Prefs.isValidProjectID("p-bridge") && Prefs.isValidProjectID("p-calc-notes-2")
+              && !Prefs.isValidProjectID("g-bridge") && !Prefs.isValidProjectID("tool-education")
+              && !Prefs.isValidProjectID("p-Bridge") && !Prefs.isValidProjectID("p-"))
+
+        // ---- the v1 -> v2 migration -------------------------------------------
+        //
+        // His real prefs.json is a v1 document with tool tabs, `g-` ids and a
+        // leaked fixture in it. The migration is what makes the upgrade a fact
+        // on disk rather than a thing the reader does every launch.
+        let v1 = """
+        {"version":1,"sshHost":"atlas","inboxRead":["a","a","b"],
+         "projects":[{"id":"g-bridge","name":"Bridge","note":"","roster":["frontend-design","main"]},
+                     {"id":"g-atlas","name":"Atlas","note":"","roster":["main"]},
+                     {"id":"p-shotempty","name":"Empty Project","note":"","roster":[]}],
+         "toolTabs":[{"id":"tool-education","name":"Education","note":"n","roster":["coursework"]}]}
+        """
+        let migrated = (try? JSONDecoder().decode(Prefs.self, from: Data(v1.utf8)))
+            .map { Prefs.sanitized($0) }
+        check("a v1 preference document still decodes rather than resetting his projects",
+              migrated != nil && (migrated?.projects.count ?? 0) == 2,
+              "ids=\(migrated?.projects.map { $0.id } ?? [])")
+        check("the migration renames gateway-adopted ids into minted ones",
+              migrated?.projects.map { $0.id } == ["p-bridge", "p-atlas"],
+              "ids=\(migrated?.projects.map { $0.id } ?? [])")
+        check("the migration drops the leaked screenshot project",
+              !(migrated?.projects.contains { $0.name == "Empty Project" } ?? true))
+        // Tool tabs are gone as a FIELD, so the proof is that the re-encoded
+        // document has no such key rather than that a value is empty.
+        let reEncoded = migrated.flatMap { try? JSONEncoder().encode($0) }
+            .flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        check("the migrated document is v2 and carries no toolTabs key at all",
+              (migrated?.version ?? 0) == 2 && !reEncoded.contains("toolTabs")
+              && !reEncoded.contains("note"),
+              reEncoded)
+        check("and it puts main first in every roster it carries over",
+              migrated?.projects.allSatisfy { $0.roster.first == "main" } ?? false,
+              "rosters=\(migrated?.projects.map { $0.roster } ?? [])")
+        check("normalising a roster is idempotent and deduplicates",
+              Prefs.normalisedRoster(["frontend-design", "main", "frontend-design", "main"])
+                == ["main", "frontend-design"])
+        check("a document that needs no migration is left exactly alone",
+              Prefs.sanitized(cleaned) == cleaned)
         web.frame = CGRect(x: 0, y: 0, width: 1440, height: 900)
         web.layoutSubtreeIfNeeded()
         try? await Task.sleep(nanoseconds: 200_000_000)
@@ -1093,13 +1251,26 @@ enum Smoke {
         // So the pane's height was a function of how many sessions the gateway
         // happened to have open, which is not a property a floor can survive.
         // Sixteen rows go in here because one does not reproduce it.
+        // A crowded strip is now a big ROSTER rather than many loose sessions:
+        // tabs come from the project's clone set, so sixteen sessions carrying a
+        // category produce nothing at all. Sixteen agents go in here because one
+        // does not reproduce it.
         let manyTabs = """
-        window.__bridgeEmit({type:'sessions',rows:Array.from({length:16},(_,i)=>(
-          {key:'agent:smoke:many'+i,agentId:'smoke',label:'A fairly long session label '+i,
-           category:'Smoke',status:'running',hasActiveRun:true,model:'claude-opus-5',
-           contextTokens:10,totalTokens:20,updatedAt:Date.now(),lastInteractionAt:Date.now(),
-           startedAt:Date.now()-1000,isMain:false}))});
-        true
+        (function(){
+          const lanes = Array.from({length:16},(_,i)=>'many-lane-'+i);
+          window.__bridgeEmit({type:'agents',agents:[{id:'main',name:'Thuban'}].concat(
+            lanes.map(id=>({id,name:'A fairly long agent label '+id})))});
+          window.__bridgeEmit({type:'prefs',path:'/tmp/smoke-prefs.json',prefs:{
+            version:2,sshHost:'atlas',inboxRead:[],
+            projects:[{id:'p-many',name:'Many',roster:['main'].concat(lanes)}]}});
+          window.__bridgeEmit({type:'sessions',rows:lanes.map((id,i)=>(
+            {key:'agent:'+id+':bridge:p-many',agentId:id,
+             label:'A fairly long session label '+i,
+             status:'running',hasActiveRun:true,model:'claude-opus-5',
+             contextTokens:10,totalTokens:20,updatedAt:Date.now(),
+             lastInteractionAt:Date.now(),startedAt:Date.now()-1000,isMain:false}))});
+          return true;
+        })()
         """
         _ = try? await web.evaluateJavaScript(manyTabs)
         try? await Task.sleep(nanoseconds: 400_000_000)
@@ -1125,6 +1296,8 @@ enum Smoke {
         let SP = (try? JSONSerialization.jsonObject(with: Data(strip.utf8))) as? [String: Any] ?? [:]
         check("many tabs: the fixture really produced a crowded strip",
               (SP["tabs"] as? Int ?? 0) >= 16, strip)
+        check("many tabs: and they are the project's clone set, room included",
+              (SP["tabs"] as? Int ?? 0) == 17, strip)
         check("many tabs: the strip is capped at two rows", (SP["stripH"] as? Int ?? 999) <= 70, strip)
         check("many tabs: and it scrolls rather than being clipped",
               (SP["stripScrolls"] as? Bool) == true, strip)
@@ -1134,6 +1307,43 @@ enum Smoke {
               (SP["activeVisible"] as? Bool) == true, strip)
         check("many tabs: the composer does not scroll because of the header",
               (SP["footScrolls"] as? Bool) == false, strip)
+
+        // The many-tabs fixture replaced the page's project list with `p-many`.
+        // Put the Phase B projects back before anything downstream asks for
+        // `p-bridge` — the room section does, and a missing project there fails
+        // as "the room drew nothing", which is a true statement about a cause
+        // three hundred lines away.
+        _ = try? await web.evaluateJavaScript("""
+          window.__bridgeEmit({type:'agents',agents:[
+            {id:'main',name:'Thuban'},{id:'frontend-design',name:'Frontend Design'},
+            {id:'backend-design',name:'Backend Design'},{id:'coursework',name:'Coursework'},
+            {id:'macos-expert',name:'macOS Expert'}]});
+          window.__bridgeEmit({type:'prefs',path:'/tmp/smoke-prefs.json',prefs:{
+            version:2,sshHost:'atlas',inboxRead:['done-old'],
+            projects:[{id:'p-bridge',name:'Bridge',
+                       roster:['main','frontend-design','backend-design','coursework','macos-expert']},
+                      {id:'p-atlas',name:'Atlas',
+                       roster:['main','frontend-design','backend-design','coursework','macos-expert']}]}});
+          // …and the clone sessions with them. `type:'sessions'` is a whole
+          // replacement, so the many-tabs fixture wiped these; without them
+          // every project is placeholders, `__focusReal` finds no agent pane at
+          // all, and the checks after this measure the room's metadata row
+          // while claiming to measure a session's.
+          window.__bridgeEmit({type:'sessions',rows:[
+            {key:'agent:main:bridge:p-bridge',agentId:'main',label:'Bridge · main',
+             status:'idle',model:'claude-opus-5',contextTokens:120,totalTokens:900,
+             updatedAt:Date.now(),lastInteractionAt:Date.now(),startedAt:Date.now()-9000,isMain:true},
+            {key:'agent:frontend-design:bridge:p-bridge',agentId:'frontend-design',
+             label:'Bridge · frontend',status:'running',hasActiveRun:true,model:'claude-opus-5',
+             contextTokens:340,totalTokens:5200,
+             updatedAt:Date.now(),lastInteractionAt:Date.now(),startedAt:Date.now()-4000,isMain:false},
+            {key:'agent:backend-design:bridge:p-atlas',agentId:'backend-design',
+             label:'Atlas · backend',status:'completed',model:'claude-sonnet-5',
+             contextTokens:80,totalTokens:410,
+             updatedAt:Date.now(),lastInteractionAt:Date.now(),startedAt:Date.now()-8000,isMain:false}]});
+          buildCategories(); renderAll(); true
+        """)
+        try? await Task.sleep(nanoseconds: 250_000_000)
 
         _ = Prefs.save(prefsBeforePicker)   // leave the real preferences as they were
         check("the picker fixtures left the preference document unchanged",
@@ -1189,15 +1399,141 @@ enum Smoke {
         check("an @ that is not an agent is not a ping",
               Room.pings(in: "email alex@example.com about it", agents: roster,
                          excluding: "main").isEmpty)
-        check("a room session key names its agent",
-              Room.key("frontend-design") == "agent:frontend-design:bridge"
-              && Room.agentId(fromRoomKey: "agent:frontend-design:bridge") == "frontend-design")
-        check("an ordinary session key is not mistaken for a room key",
-              Room.agentId(fromRoomKey: "agent:main:main") == nil)
+        check("a clone session key names its agent AND its project",
+              Room.key("frontend-design", project: "p-bridge")
+                == "agent:frontend-design:bridge:p-bridge"
+              && Room.route(fromRoomKey: "agent:frontend-design:bridge:p-bridge")?.agent
+                == "frontend-design"
+              && Room.route(fromRoomKey: "agent:frontend-design:bridge:p-bridge")?.project
+                == "p-bridge")
+        // THE SAME AGENT IN TWO PROJECTS IS TWO SESSIONS. This is the whole
+        // isolation claim reduced to the one string it actually rests on: if
+        // these ever collide, two projects share a transcript and nothing else
+        // in the app would notice.
+        check("the same agent in two projects is two different sessions",
+              Room.key("frontend-design", project: "p-bridge")
+                != Room.key("frontend-design", project: "p-calcnotes"))
+        check("an ordinary session key is not mistaken for a clone key",
+              Room.route(fromRoomKey: "agent:main:main") == nil)
+        check("a v1 three-part room key is no longer a clone key",
+              Room.route(fromRoomKey: "agent:main:bridge") == nil)
+        check("a clone key with an empty project is not a clone key",
+              Room.route(fromRoomKey: "agent:main:bridge:") == nil)
         check("thinking is never relayed",
               Room.plainText(["role": "assistant", "content": [
                 ["type": "thinking", "text": "private"],
                 ["type": "text", "text": "said out loud"]]]) == "said out loud")
+
+        // ---- project isolation ------------------------------------------------
+        //
+        // Two projects, both holding `frontend-design` and `backend-design`, and
+        // one holding a lane the other does not. Everything below runs against
+        // Room's real routing rather than a model of it.
+        // POINT THE ROOM STORE AT SCRATCH FOR THIS WHOLE SECTION.
+        //
+        // These fixtures create projects, say things in them and remove them
+        // again — against the REAL `room.json`, next to a Bridge that is very
+        // likely open on his desk holding its own copy in memory. Restoring
+        // afterwards is not enough when something else is writing the same file:
+        // the two races and the loser is whichever wrote first. `Room.url` hangs
+        // off `Prefs.directory`, so overriding the directory moves the whole
+        // section somewhere disposable, and the assertion below is that his file
+        // was never touched rather than that it was put back.
+        let realDir = Prefs.directoryOverride
+        let roomBytesBefore = try? Data(contentsOf: Room.url)
+        Prefs.directoryOverride = URL(fileURLWithPath:
+            NSTemporaryDirectory() + "bridge-smoke-\(UUID().uuidString.prefix(8))")
+        let roomStoreBefore = Room.shared.store
+        let projectsBefore = Room.shared.projects
+        let pA = "p-smoke-alpha", pB = "p-smoke-beta"
+        Room.shared.setAgents(roster.map { (id: $0, name: $0) })
+        Room.shared.setProjects([
+            Prefs.Project(id: pA, name: "Alpha",
+                          roster: ["main", "frontend-design", "backend-design"]),
+            Prefs.Project(id: pB, name: "Beta",
+                          roster: ["main", "frontend-design", "cybersecurity"]),
+        ])
+
+        check("a project's roster is the set an agent in it can reach",
+              Room.shared.roster(of: pA) == ["main", "frontend-design", "backend-design"])
+        check("a project nobody made has no roster, so it is unroutable",
+              Room.shared.roster(of: "p-does-not-exist").isEmpty)
+
+        // A PING IS RESOLVED AGAINST THE PROJECT'S ROSTER, NOT THE GATEWAY'S
+        // AGENT LIST. `cybersecurity` is a real agent and is in Beta; from
+        // inside Alpha it must resolve to nothing at all.
+        check("a ping naming a lane outside the project resolves to nothing",
+              Room.pings(in: "@cybersecurity can you review this",
+                         agents: Room.shared.roster(of: pA), excluding: "frontend-design").isEmpty)
+        check("and the same ping inside the project that HAS that lane resolves",
+              Room.pings(in: "@cybersecurity can you review this",
+                         agents: Room.shared.roster(of: pB),
+                         excluding: "frontend-design") == ["cybersecurity"])
+
+        // …and the enforcement, at the door rather than at the parser: even a
+        // caller that hands `deliver` a target directly cannot reach out of the
+        // project. This is what makes "no cross-project messaging" a property of
+        // the code and not of every call site remembering.
+        let crossBefore = Room.shared.doc(pA).messages.count
+        let crossWire = Room.shared.deliver(to: "cybersecurity", project: pA,
+                                            from: "frontend-design", text: "reach across", hop: 1)
+        let crossRow = Room.shared.doc(pA).messages.last
+        check("deliver REFUSES a target that is not in the project",
+              crossWire == nil, "wire=\(crossWire ?? "nil")")
+        check("and it says so in that project's transcript rather than failing silently",
+              Room.shared.doc(pA).messages.count == crossBefore + 1
+              && crossRow?.kind == "error"
+              && (crossRow?.text ?? "").contains("only reach agents inside their own project"),
+              "kind=\(crossRow?.kind ?? "nil") text=\(crossRow?.text ?? "")")
+        check("a refused cross-project send reaches the other project not at all",
+              Room.shared.doc(pB).messages.isEmpty,
+              "beta=\(Room.shared.doc(pB).messages.count)")
+        check("deliver into a project that does not exist is refused outright",
+              Room.shared.deliver(to: "main", project: "p-does-not-exist",
+                                  from: "chancellor", text: "hello", hop: 0) == nil)
+
+        // The preamble is the only place a clone learns the rules it is inside,
+        // so what it states is asserted rather than assumed.
+        let pre = Room.shared.preamble(for: "frontend-design", project: pA)
+        check("the preamble names the project the clone is working in",
+              pre.contains("project Alpha"), pre)
+        check("the preamble names only that project's teammates",
+              pre.contains("backend-design") && !pre.contains("cybersecurity"), pre)
+        check("the preamble states that reach stops at the project boundary",
+              pre.contains("ONLY REACH AGENTS IN Alpha"), pre)
+        check("the preamble names the clone's PRIVATE memory file",
+              pre.contains(Room.memoryPath(project: pA, agent: "frontend-design"))
+              && pre.contains("yours alone"), pre)
+        check("and the ONE shared memory file every clone in every project uses",
+              pre.contains(Room.sharedMemoryPath)
+              && pre.contains("shared by every agent in every project"), pre)
+        check("the two memory paths are different files",
+              Room.memoryPath(project: pA, agent: "frontend-design")
+                != Room.memoryPath(project: pB, agent: "frontend-design"))
+        check("the shared memory file is the same one from either project",
+              Room.sharedMemoryPath == Room.sharedMemoryPath
+              && !Room.sharedMemoryPath.contains(pA) && !Room.sharedMemoryPath.contains(pB))
+
+        // Rooms are per project: a transcript, a pause and a rate limit in one
+        // say nothing about the other.
+        Room.shared.note("alpha only", project: pA, kind: "note")
+        check("a note lands in its own project's room and nowhere else",
+              Room.shared.doc(pA).messages.last?.text == "alpha only"
+              && Room.shared.doc(pB).messages.isEmpty)
+        Room.shared.setPaused(true, project: pA)
+        check("pausing one project's relay leaves the other running",
+              Room.shared.doc(pA).paused && !Room.shared.doc(pB).paused)
+        Room.shared.setPaused(false, project: pA)
+
+        // Removing a project takes its room with it. A project recreated under
+        // the same name must not inherit a conversation from a previous life.
+        Room.shared.setProjects([Prefs.Project(id: pB, name: "Beta",
+                                               roster: ["main", "frontend-design", "cybersecurity"])])
+        check("removing a project drops its room",
+              Room.shared.doc(pA).messages.isEmpty && Room.shared.project(pA) == nil,
+              "alpha=\(Room.shared.doc(pA).messages.count)")
+        check("and leaves the other project's room untouched",
+              Room.shared.project(pB) != nil)
 
         // ---- first sight of a session must not replay its history ------------
         //
@@ -1205,55 +1541,68 @@ enum Smoke {
         // that already had 40 turns in it before the room existed would, on the
         // first backfill, pour all 40 into the transcript and re-fire every ping
         // inside them — a relay storm out of history, on launch.
-        let roomBefore = Room.shared.doc
+        let pProbe = "p-smoke-probe"
+        Room.shared.setProjects([Prefs.Project(id: pProbe, name: "Probe", roster: roster)])
         // A key no real agent owns, so this reads none of Chancellor's state.
         //
         // The first version of this check used a real room key and passed once,
         // then failed on the next run — because the LIVE section below connects,
-        // subscribes to all nine room sessions, and seeds `seen[key] = 0` for
-        // each. The second run then had a mark of 0 rather than nil and the
-        // "first sight" branch was never taken. The test was reading ambient
-        // state; that is a bad test, not a bad behaviour, and a unique key is
-        // the fix. The behaviour it exposed is asserted on its own below.
-        let probeKey = "agent:smoke-\(UUID().uuidString.prefix(8).lowercased()):bridge"
+        // subscribes to every clone session, and seeds `seen[key] = 0` for each.
+        // The second run then had a mark of 0 rather than nil and the "first
+        // sight" branch was never taken. The test was reading ambient state;
+        // that is a bad test, not a bad behaviour, and a unique key is the fix.
+        let probeLane = "smoke-\(UUID().uuidString.prefix(8).lowercased())"
+        Room.shared.setProjects([Prefs.Project(id: pProbe, name: "Probe",
+                                               roster: roster + [probeLane])])
+        let probeKey = Room.key(probeLane, project: pProbe)
         let history: [[String: Any]] = [
             ["role": "assistant", "content": [["type": "text", "text": "old turn @backend-design"]],
              "__openclaw": ["seq": 7]],
         ]
         Room.shared.observe(key: probeKey, messages: history)
-        check("first sight of a room session seeds the mark and emits nothing",
-              Room.shared.doc.messages.count == roomBefore.messages.count
-              && Room.shared.doc.seen[probeKey] == 7,
-              "seen=\(Room.shared.doc.seen[probeKey].map(String.init) ?? "nil")")
+        check("first sight of a clone session seeds the mark and emits nothing",
+              Room.shared.doc(pProbe).messages.isEmpty
+              && Room.shared.doc(pProbe).seen[probeKey] == 7,
+              "seen=\(Room.shared.doc(pProbe).seen[probeKey].map(String.init) ?? "nil")")
         // …and a turn ABOVE the mark does land.
-        Room.shared.setAgents(roster.map { (id: $0, name: $0) })
         Room.shared.observe(key: probeKey, messages: history + [
             ["role": "assistant", "content": [["type": "text", "text": "new turn"]],
              "__openclaw": ["seq": 8]]])
-        check("a turn above the high-water mark enters the room",
-              Room.shared.doc.messages.count == roomBefore.messages.count + 1
-              && Room.shared.doc.messages.last?.text == "new turn",
-              "n=\(Room.shared.doc.messages.count) base=\(roomBefore.messages.count)")
-        // …and the case the broken version of this test walked into. A room
+        check("a turn above the high-water mark enters that project's room",
+              Room.shared.doc(pProbe).messages.count == 1
+              && Room.shared.doc(pProbe).messages.last?.text == "new turn",
+              "n=\(Room.shared.doc(pProbe).messages.count)")
+        // A backfill for a project that no longer exists is not ours to take in.
+        let goneKey = Room.key("main", project: "p-smoke-removed")
+        Room.shared.observe(key: goneKey, messages: [
+            ["role": "assistant", "content": [["type": "text", "text": "orphan"]],
+             "__openclaw": ["seq": 1]]])
+        check("a backfill for a removed project is ignored, not filed somewhere",
+              Room.shared.doc("p-smoke-removed").messages.isEmpty
+              && Room.shared.doc(pProbe).messages.count == 1)
+        // …and the case the broken version of this test walked into. A clone
         // session that does not exist yet answers chat.history with nothing, so
         // it is seeded at 0 — which is correct, there is nothing to replay — and
         // the turns it produces once it DOES exist must still arrive. Getting
-        // this wrong either loses every turn in a freshly created room thread
-        // (seed too high) or replays history on every launch (never seed).
-        let freshKey = "agent:smoke-\(UUID().uuidString.prefix(8).lowercased()):bridge"
-        let midpoint = Room.shared.doc.messages.count
+        // this wrong either loses every turn in a freshly created thread (seed
+        // too high) or replays history on every launch (never seed).
+        let freshLane = "smoke-\(UUID().uuidString.prefix(8).lowercased())"
+        Room.shared.setProjects([Prefs.Project(id: pProbe, name: "Probe",
+                                               roster: roster + [probeLane, freshLane])])
+        let freshKey = Room.key(freshLane, project: pProbe)
+        let midpoint = Room.shared.doc(pProbe).messages.count
         Room.shared.observe(key: freshKey, messages: [])
-        check("a room session that does not exist yet seeds at zero",
-              Room.shared.doc.seen[freshKey] == 0
-              && Room.shared.doc.messages.count == midpoint,
-              "seen=\(Room.shared.doc.seen[freshKey].map(String.init) ?? "nil")")
+        check("a clone session that does not exist yet seeds at zero",
+              Room.shared.doc(pProbe).seen[freshKey] == 0
+              && Room.shared.doc(pProbe).messages.count == midpoint,
+              "seen=\(Room.shared.doc(pProbe).seen[freshKey].map(String.init) ?? "nil")")
         Room.shared.observe(key: freshKey, messages: [
             ["role": "assistant", "content": [["type": "text", "text": "first turn ever"]],
              "__openclaw": ["seq": 1]]])
-        check("the first turn in a newly created room thread still arrives",
-              Room.shared.doc.messages.count == midpoint + 1
-              && Room.shared.doc.messages.last?.text == "first turn ever",
-              "n=\(Room.shared.doc.messages.count) midpoint=\(midpoint)")
+        check("the first turn in a newly created clone thread still arrives",
+              Room.shared.doc(pProbe).messages.count == midpoint + 1
+              && Room.shared.doc(pProbe).messages.last?.text == "first turn ever",
+              "n=\(Room.shared.doc(pProbe).messages.count) midpoint=\(midpoint)")
 
         // ---- a relay that never left the socket must not read as delivered ----
         //
@@ -1263,47 +1612,96 @@ enum Smoke {
         // document, kept showing a hand-off with a target chip that had reached
         // nobody. Gateway now routes every `room-` write result back into the
         // room, and a failure is a visible row rather than nothing.
-        let beforeFail = Room.shared.doc.messages.count
-        Room.shared.sendFailed(requestId: "room-not-a-real-request",
+        let beforeFail = Room.shared.doc(pProbe).messages.count
+        Room.shared.debugTrackInflight(requestId: "room-smoke-fail",
+                                       project: pProbe, target: "backend-design")
+        Room.shared.sendFailed(requestId: "room-smoke-fail",
                                code: "TIMEOUT", message: "chat.send did not answer within 30s")
-        let failRow = Room.shared.doc.messages.last
+        let failRow = Room.shared.doc(pProbe).messages.last
         check("a room send that did not land says so in the transcript",
-              Room.shared.doc.messages.count == beforeFail + 1 && failRow?.kind == "error",
-              "n=\(Room.shared.doc.messages.count) kind=\(failRow?.kind ?? "nil")")
+              Room.shared.doc(pProbe).messages.count == beforeFail + 1 && failRow?.kind == "error",
+              "n=\(Room.shared.doc(pProbe).messages.count) kind=\(failRow?.kind ?? "nil")")
         check("and it names the failure rather than just failing",
               (failRow?.text ?? "").contains("TIMEOUT")
               && (failRow?.text ?? "").contains("never reached the gateway"),
               failRow?.text ?? "")
+        check("and it names the lane it did not reach",
+              (failRow?.text ?? "").contains("@backend-design"), failRow?.text ?? "")
+        // A failure for a request nobody is holding has no project to be
+        // reported into, and inventing one would tell him a lie about which room
+        // lost a message.
+        let beforeOrphan = Room.shared.doc(pProbe).messages.count
+        Room.shared.sendFailed(requestId: "room-not-a-real-request",
+                               code: "TIMEOUT", message: "unheld")
+        check("a failure for an untracked request is dropped, not blamed on a room",
+              Room.shared.doc(pProbe).messages.count == beforeOrphan)
         // The success path is silent, which is the point: a landed relay is the
         // turn already in the transcript, not a second row about it.
-        let beforeLanded = Room.shared.doc.messages.count
-        Room.shared.sendLanded(requestId: "room-not-a-real-request")
+        let beforeLanded = Room.shared.doc(pProbe).messages.count
+        Room.shared.sendLanded(requestId: "room-smoke-fail")
         check("a relay that landed adds no second row",
-              Room.shared.doc.messages.count == beforeLanded,
-              "n=\(Room.shared.doc.messages.count)")
+              Room.shared.doc(pProbe).messages.count == beforeLanded,
+              "n=\(Room.shared.doc(pProbe).messages.count)")
 
-        Room.shared.restore(roomBefore)
+        // ORDER MATTERS, AND IT IS THIS WAY ROUND.
+        //
+        // `setProjects` PRUNES: it drops the room of any project not in the list
+        // it is given, which is what makes removing a project remove its
+        // transcript. So restoring projects after restoring the store deletes
+        // exactly the rooms the restore just put back — and it did, for any room
+        // belonging to a project the PAGE had created through the real prefs
+        // bridge (the fixtures do: `reconcileRosters` saves, and BridgeApp's
+        // `prefs` case hands the result straight to `setProjects`). `restore` is
+        // the last word on the store, so it goes last.
+        Room.shared.setProjects(projectsBefore)
+        Room.shared.restore(roomStoreBefore)
+        Prefs.directoryOverride = realDir
+        check("the isolation fixtures put Room's store back",
+              Room.shared.store == roomStoreBefore,
+              "beforeRooms=\(roomStoreBefore.rooms.keys.sorted()) beforeV=\(roomStoreBefore.version) "
+              + "afterRooms=\(Room.shared.store.rooms.keys.sorted()) afterV=\(Room.shared.store.version)")
+        check("and its project list back",
+              Room.shared.projects == projectsBefore,
+              "before=\(projectsBefore.map { $0.id }) after=\(Room.shared.projects.map { $0.id })")
+        let roomBytesAfter = try? Data(contentsOf: Room.url)
+        check("and never touched his real room.json at all",
+              roomBytesAfter == roomBytesBefore,
+              "before=\(roomBytesBefore?.count ?? -1) after=\(roomBytesAfter?.count ?? -1)")
 
         // ---- the room, rendered ----------------------------------------------
+        // The payload is now keyed by PROJECT, and the fixture carries TWO of
+        // them: one with the exchange in it and one empty. A one-project fixture
+        // cannot tell the difference between "this project's room" and "the
+        // room", which is the exact distinction this pass introduced.
         let roomFixture = """
-        window.__bridgeEmit({type:'room', paused:false, pauseReason:'', maxHops:6, maxRelays:14,
-          relayWindowMin:5, relaysInWindow:2,
-          agents:[{id:'main',name:'Thuban',key:'agent:main:bridge'},
-                  {id:'frontend-design',name:'Frontend Design',key:'agent:frontend-design:bridge'},
-                  {id:'backend-design',name:'Backend Design',key:'agent:backend-design:bridge'},
-                  {id:'full-stack',name:'Full Stack',key:'agent:full-stack:bridge'}],
-          messages:[
-            {id:'m1',at:Date.now()-40000,from:'chancellor',to:['frontend-design'],
-             text:'Build the composer for the room.',kind:'say',hop:0},
-            // One turn, two hand-offs. The row must show BOTH — collapsing a
-            // reply's targets to the first one loses the second silently.
-            {id:'m2',at:Date.now()-30000,from:'frontend-design',to:['backend-design','full-stack'],
-             text:'Composer is in. @backend-design rate limit, @full-stack review.',kind:'say',hop:1},
-            {id:'m3',at:Date.now()-20000,from:'backend-design',to:[],
-             text:'Rate limit landed. Nothing else needed from me.',kind:'say',hop:2},
-            {id:'m4',at:Date.now()-10000,from:'bridge',to:[],
-             text:'Relay paused: too many hand-offs.',kind:'note',hop:0}]});
-        openRoom();
+        window.__bridgeEmit({type:'room', maxHops:6, maxRelays:14, relayWindowMin:5,
+          sharedMemory:'~/.openclaw/workspace/memory/bridge/SHARED.md',
+          memoryRoot:'~/.openclaw/workspace/memory/bridge',
+          rooms:{
+            'p-bridge':{
+              paused:false, pauseReason:'', relaysInWindow:2,
+              agents:[{id:'main',name:'Thuban',key:'agent:main:bridge:p-bridge'},
+                      {id:'frontend-design',name:'Frontend Design',
+                       key:'agent:frontend-design:bridge:p-bridge'},
+                      {id:'backend-design',name:'Backend Design',
+                       key:'agent:backend-design:bridge:p-bridge'},
+                      {id:'coursework',name:'Coursework',key:'agent:coursework:bridge:p-bridge'}],
+              messages:[
+                {id:'m1',at:Date.now()-40000,from:'chancellor',to:['frontend-design'],
+                 text:'Build the composer for the room.',kind:'say',hop:0},
+                // One turn, two hand-offs. The row must show BOTH — collapsing a
+                // reply's targets to the first one loses the second silently.
+                {id:'m2',at:Date.now()-30000,from:'frontend-design',
+                 to:['backend-design','coursework'],
+                 text:'Composer is in. @backend-design rate limit, @coursework review.',
+                 kind:'say',hop:1},
+                {id:'m3',at:Date.now()-20000,from:'backend-design',to:[],
+                 text:'Rate limit landed. Nothing else needed from me.',kind:'say',hop:2},
+                {id:'m4',at:Date.now()-10000,from:'bridge',to:[],
+                 text:'Relay paused: too many hand-offs.',kind:'note',hop:0}]},
+            'p-atlas':{ paused:false, pauseReason:'', relaysInWindow:0, agents:[], messages:[] }}});
+        S.roomPing = null;
+        openProjectRoom('p-bridge');
         true
         """
         _ = try? await web.evaluateJavaScript(roomFixture)
@@ -1334,16 +1732,16 @@ enum Smoke {
               (RM["rows"] as? Int ?? 0) == 4, roomDom)
         check("every hand-off in a turn is named, not just the first",
               (RM["handoffs"] as? [String] ?? [])
-                == ["→ @frontend-design", "→ @backend-design", "→ @full-stack"], roomDom)
+                == ["→ @frontend-design", "→ @backend-design", "→ @coursework"], roomDom)
         check("a turn that hands off to nobody shows no target chip",
               (RM["handoffs"] as? [String] ?? []).count == 3, roomDom)
         check("hop depth is drawn only once a message is no longer Chancellor's",
               (RM["hops"] as? [String] ?? []) == ["hop 1", "hop 2"], roomDom)
-        // The same control, in two modes, on one screen: nav in the topbar, ping
-        // in the composer. Four agents -> four nav tabs, and three ping bubbles
-        // plus "no ping" (main is not offered twice).
-        check("the agent strip renders in nav mode in the topbar",
-              (RM["navTabs"] as? Int ?? 0) == 4, roomDom)
+        // The topbar is the project's page-tabs now — the room plus one per
+        // agent — rather than a second copy of the agent strip. Five tabs for
+        // the five-agent fixture roster: room, and four agents after main.
+        check("the topbar carries the project's tabs while its room is open",
+              (RM["navTabs"] as? Int ?? 0) == 5, roomDom)
         check("the same control renders in ping mode in the composer",
               (RM["pingTabs"] as? Int ?? 0) == 4, roomDom)
         check("an unpinged message states that it goes to main alone",
@@ -1506,6 +1904,13 @@ enum Smoke {
         check("context is labelled and shows a token count", ctext.contains("context"), ctext)
         check("no context maximum is printed", !ctext.contains("context window"), ctext)
         check("no percentage and no fill bar", !ctext.contains("%") && (CX["bars"] as? Int ?? 1) == 0, ctext)
+
+        // Everything the error trap caught, named. This runs late so it covers
+        // every render above it.
+        let errs = (try? await web.evaluateJavaScript(
+            "JSON.stringify(window.__errs || [])")) as? String ?? "[]"
+        check("no render threw an uncaught exception anywhere in this run",
+              errs == "[]", errs)
 
         // ---- hold space to talk: the arming rule ------------------------------
         //
@@ -1914,7 +2319,7 @@ enum Smoke {
           (function(){
             const c = CATEGORIES.find(x=>x.kind==='tool');
             if (!c) return JSON.stringify({none:true});
-            S.view='sessions'; S.catId=c.id; S.customize=null; S.sub=null; renderAll();
+            S.view='sessions'; S.catId=c.id; S.sub=null; renderAll();
             const body = document.querySelector('.content');
             return JSON.stringify({ blank: (body.textContent||'').trim().length < 40,
               says: (body.textContent||'').length,
@@ -1989,34 +2394,37 @@ enum Smoke {
                    || CATEGORIES.find(x => x.kind === 'project' && x.agents.length)
                    || CATEGORIES.find(x => x.kind === 'project');
             if (!c) return false;
-            const real = c.agents.find(a => a.sessionKey && !a.parent);
-            const lanes = [...new Set(c.agents.map(a => a.lane))].filter(Boolean).slice(0, 3);
-            prefUpsert(c.id, c.name, { roster: lanes });
-            buildCategories();
-            S.view = 'sessions'; S.catId = c.id; S.customize = c.id; S.sub = null;
+            // No roster rewrite: a project's roster IS its clone set and this
+            // view no longer has a picker to open. It photographs the project as
+            // it really is, on one of its agent tabs rather than its room, since
+            // the room has its own view below.
+            const real = c.agents.find(a => a.sessionKey && !a.parent && a.kind !== 'room');
+            S.view = 'sessions'; S.catId = c.id; S.sub = null;
             if (real) S.tab[c.id] = real.id;
             renderAll();
             return true;
           })()
         """,
 
-        // An EMPTY project with the picker open — the one view that draws the
-        // roster picker with no composer beside it. It exists as a view because
-        // the 18vh cap is scoped to the view that HAS a composer, and a scoping
-        // rule nobody photographs is a scoping rule that quietly stops holding.
-        // It creates a real local project through the real prefs path, exactly
-        // as the "New project" button does. Both shot paths snapshot and restore
-        // the preference document around it — see `restorePrefs` in `shot()`.
+        // A BRAND NEW PROJECT, created exactly the way the "New project" button
+        // creates one — through `fromUser` and `projectCreate`, so this view is
+        // also a live exercise of the intent gate rather than a mock of it. What
+        // it photographs is the state right after creation: the full clone set
+        // already rostered, every tab a placeholder, and the room waiting for
+        // the first thing said to it.
+        //
+        // It writes to the REAL preference document, so both shot paths snapshot
+        // and restore it — see `restorePrefs` in `shot()`. The previous version
+        // of this view pushed `p-shotempty` straight into PREFS and left it
+        // there; that project sat in Chancellor's live sidebar for days.
         "emptyproject": """
           (function(){
-            const id = 'p-shotempty';
-            if (!PREFS.projects.some(p => p.id === id))
-              PREFS.projects.push({ id, name: 'Empty Project', roster: [], note: '' });
-            savePrefs();
+            const id = fromUser(() => projectCreate('Shot Fixture Project'))();
+            if (!id) return false;
             buildCategories();
-            S.view = 'sessions'; S.catId = id; S.customize = id; S.sub = null;
+            S.view = 'sessions'; S.catId = id; S.tab[id] = id + '::room'; S.sub = null;
             renderAll();
-            return !!document.querySelector('.cust') && !document.querySelector('.foot');
+            return !!document.querySelector('.pane.room');
           })()
         """,
 
@@ -2040,7 +2448,7 @@ enum Smoke {
               const tl = (a.transcript || []).filter(e => e.kind === 'tool'
                                                      && /^mcp__/.test(e.name || ''));
               if (!tl.length) continue;
-              S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null; S.customize=null;
+              S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null;
               renderAll();
               const rows = [...document.querySelectorAll('.tool-call b')]
                 .filter(b => /^mcp__/.test(b.textContent||''));
@@ -2068,8 +2476,10 @@ enum Smoke {
         // still shoots the empty state, which is a real state and says so.
         "room": """
           (function(){
-            S.view='room'; S.customize=null; S.roomPing=null;
-            renderAll();
+            const c = CATEGORIES[0];
+            if (!c) return false;
+            S.roomPing=null;
+            openProjectRoom(c.id);
             const tx = document.getElementById('tx-main');
             if (tx) tx.scrollTop = tx.scrollHeight;
             return true;
@@ -2080,9 +2490,12 @@ enum Smoke {
         // ping bar, and the note under the composer stating where it goes.
         "ping": """
           (function(){
-            S.view='room'; S.customize=null;
-            const ag = (ROOM.agents||[]).find(a=>a.id!=='main');
-            if (ag) S.roomPing = ag.id;
+            
+            const c = CATEGORIES[0];
+            if (!c) return false;
+            openProjectRoom(c.id);
+            const ag = (c.roster||[]).find(id=>id!=='main');
+            if (ag) S.roomPing = ag;
             S.roomDraft = 'Take the CSS side of this and hand it on when you are done.';
             renderAll();
             const b = document.querySelector('.ping-b.is-active');
@@ -2103,7 +2516,7 @@ enum Smoke {
           (function(){
             const c = CATEGORIES.find(x => x.kind === 'tool');
             if (!c) return false;
-            S.view='sessions'; S.catId=c.id; S.customize=null; S.sub=null;
+            S.view='sessions'; S.catId=c.id; S.sub=null;
             renderAll();
             return true;
           })()
@@ -2127,7 +2540,7 @@ enum Smoke {
             const a = CATEGORIES.flatMap(c=>c.agents).find(x => x.sessionKey && !x.parent);
             if (!a) return false;
             const c = catOf(a.id);
-            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null; S.customize=null;
+            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null;
             const realSend = window.__bridgeSend;
             window.__bridgeSend = () => {};
             VOICE.state='idle'; VOICE.requestId=null; VOICE.target=null;
@@ -2151,7 +2564,7 @@ enum Smoke {
             const a = CATEGORIES.flatMap(c=>c.agents).find(x => x.sessionKey && !x.parent);
             if (!a) return false;
             const c = catOf(a.id);
-            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null; S.customize=null;
+            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null;
             const realSend = window.__bridgeSend;
             window.__bridgeSend = () => {};
             VOICE.state='idle'; VOICE.requestId=null; VOICE.target=null;
@@ -2190,7 +2603,7 @@ enum Smoke {
             const a = CATEGORIES.flatMap(c=>c.agents).find(x => x.sessionKey && !x.parent);
             if (!a) return false;
             const c = catOf(a.id);
-            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null; S.customize=null;
+            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null;
             S.draft[a.id] = '';
             VOICE.target=a.id; VOICE.state='empty'; VOICE.error=null; VOICE.requestId=null;
             renderAll();
@@ -2207,7 +2620,7 @@ enum Smoke {
             const a = CATEGORIES.flatMap(c=>c.agents).find(x => x.sessionKey && !x.parent);
             if (!a) return false;
             const c = catOf(a.id);
-            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null; S.customize=null;
+            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null;
             S.draft[a.id] = '';
             VOICE.target=a.id; VOICE.state='empty'; VOICE.error=null; VOICE.requestId=null;
             renderAll();
@@ -2237,7 +2650,7 @@ enum Smoke {
             const a = CATEGORIES.flatMap(c=>c.agents).find(x => x.sessionKey);
             if (!a) return false;
             const c = catOf(a.id);
-            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null; S.customize=null;
+            S.view='sessions'; S.catId=c.id; S.tab[c.id]=a.id; S.sub=null;
             S.draft[a.id] = 'Please summarise where this run got to.';
             renderAll();
             submitComposer(a);
@@ -2651,7 +3064,7 @@ enum Smoke {
           pingSel: (document.querySelector('.ping-b.is-active[data-id]')||{}).getAttribute
                    ? document.querySelector('.ping-b.is-active[data-id]').getAttribute('data-id')
                    : 'none',
-          custH: (function(){const n=r('.cust');return n?Math.round(n.height):-1})(),
+          roomH: (function(){const n=r('.pane.room');return n?Math.round(n.height):-1})(),
           overflowX: de.scrollWidth - de.clientWidth,
           /* PIXEL PROBE (pass 12, temporary): text clipped by its own box.
              Every layout defect found in passes 3, 10 and 11 was found by a
