@@ -1111,6 +1111,47 @@ body[data-split="1"] .p-use > span:not(:last-child)::after { margin: 0 7px; }
 }
 .add-go:hover { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.45); }
 
+/* ── remove a project ──────────────────────────────────────────────────────
+   The nav item and its remove button share one row, so `.nav__wrap` is the
+   positioning context and the button rides on top of the item's right edge
+   rather than shrinking it. Hidden until the row is hovered or something in it
+   has focus: a destructive control sitting permanently next to a navigation
+   target is one you eventually hit by accident, and :focus-within keeps it
+   reachable from the keyboard.
+
+   Removing a project drops its rooms with it, so the click is two-step — the
+   `×` opens the confirm row, and only that row's Remove button calls through. */
+.nav__wrap { position: relative; }
+.nav__rm-b {
+  position: absolute; top: 15px; right: 6px; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  border: 1px solid transparent; border-radius: 6px;
+  background: none; color: var(--ink-faint);
+  font-family: inherit; font-size: 14px; line-height: 1; cursor: pointer;
+  opacity: 0; transition: 0.15s;
+}
+.nav__wrap:hover .nav__rm-b,
+.nav__wrap:focus-within .nav__rm-b { opacity: 1; }
+.nav__rm-b:hover {
+  color: var(--neg, #c2554d);
+  border-color: rgba(var(--ink-rgb), 0.18);
+  background: rgba(var(--ink-rgb), 0.05);
+}
+.nav__rm-b:focus-visible { opacity: 1; outline: 2px solid var(--brass); outline-offset: 1px; }
+
+.nav__rm {
+  display: flex; align-items: center; gap: 5px; flex-wrap: wrap;
+  margin: 3px 0 2px; padding: 7px 9px;
+  border: 1px solid rgba(var(--ink-rgb), 0.16); border-radius: 9px;
+  background: rgba(var(--ink-rgb), 0.04);
+}
+.nav__rm > span { flex: 1 0 100%; color: var(--ink-dim); font-size: 11.5px; }
+.nav__rm .add-go { color: var(--neg, #c2554d); }
+.nav__rm .add-go:hover {
+  border-color: rgba(var(--ink-rgb), 0.28); background: rgba(var(--ink-rgb), 0.06);
+}
+
 .foot-set {
   display: flex; align-items: center; gap: 9px;
   width: 100%; margin-bottom: 9px; padding: 6px 10px;

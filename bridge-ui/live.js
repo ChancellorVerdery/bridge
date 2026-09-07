@@ -65,30 +65,128 @@ const LIVE = {
    first paint that races the load cannot overwrite last week's projects with
    this second's blanks. */
 
-const PREFS = { loaded: false, version: 1, sshHost: 'atlas', projects: [], toolTabs: [], inboxRead: [] };
+const PREFS = { loaded: false, version: 2, sshHost: 'atlas', projects: [], inboxRead: [] };
 
 function savePrefs() {
   if (!PREFS.loaded) return;            // never write back what was never read
   if (typeof window === 'undefined' || !window.__bridgeSend) return;
   window.__bridgeSend({ t: 'prefs', prefs: {
     version: PREFS.version, sshHost: PREFS.sshHost,
-    projects: PREFS.projects, toolTabs: PREFS.toolTabs, inboxRead: PREFS.inboxRead,
+    projects: PREFS.projects, inboxRead: PREFS.inboxRead,
   } });
 }
 
-/* The roster / note record for a category, whether it is a gateway group
-   (id `g-…`), a project made here (`p-…`) or a tool tab (`tool-…`). */
-function prefFor(catId) {
-  const list = catId.startsWith('tool-') ? PREFS.toolTabs : PREFS.projects;
-  return list.find((x) => x.id === catId) || null;
+function prefFor(catId) { return PREFS.projects.find((x) => x.id === catId) || null; }
+
+/* ───────────────── AGENTS MUST NOT BE ABLE TO CREATE PROJECTS ─────────────────
+
+   Chancellor creates projects; agents work inside them. That is a rule about
+   ACTORS, and a rule about actors that is only written down is a convention. It
+   is enforced here, in code, at three doors — this is doors 1 and 2, and
+   Prefs.swift `sanitized` is door 3.
+
+   DOOR 1 — provenance. `buildCategories` builds the sidebar from PREFS.projects
+   and nothing else. In Phase B a gateway session group, or any session carrying
+   a `category`, became a project on sight: an agent that set a category created
+   a project, and two of them ("Diagnostics", and the "Empty Project" a
+   screenshot run leaked) were sitting in the sidebar having never been asked
+   for. That path is gone. Nothing arriving on the socket can produce a project.
+
+   DOOR 2 — intent. PREFS.projects is mutated only by `projectCreate` and
+   `projectRemove`, and both refuse to run unless a DOM event handler is on the
+   stack. Every gateway message is dispatched from `window.__bridgeEmit`, which
+   never sets the token, so a code path reached from the wire cannot mutate the
+   project list even by calling the mutators directly — it throws instead.
+
+   The token is set and cleared SYNCHRONOUSLY around the handler. Nothing inside
+   may await: a token that outlived its turn would be a token that is sometimes
+   just set, which is no gate at all. */
+
+let USER_INTENT = false;
+
+/* Wrap a DOM event handler. `fn` runs with the intent token set, and the token
+   is cleared in a finally so a throw cannot leave it standing. */
+function fromUser(fn) {
+  return function (...args) {
+    USER_INTENT = true;
+    try { return fn.apply(this, args); } finally { USER_INTENT = false; }
+  };
 }
-function prefUpsert(catId, name, patch) {
-  const list = catId.startsWith('tool-') ? PREFS.toolTabs : PREFS.projects;
-  let rec = list.find((x) => x.id === catId);
-  if (!rec) { rec = { id: catId, name, roster: [], note: '' }; list.push(rec); }
-  Object.assign(rec, patch);
+
+function requireUserIntent(what) {
+  if (!USER_INTENT) {
+    throw new Error('Bridge: refused to ' + what + ' — projects are created and removed by '
+      + 'Chancellor, not by anything on the gateway. See live.js, door 2.');
+  }
+}
+
+/* Every agent the gateway reports, `main` first. THIS IS THE CLONE SET: creating
+   a project copies it in whole, so `frontend-design` in Bridge and
+   `frontend-design` in CalcNotes are two separate live sessions that share no
+   state. Falls back to the ids already rostered somewhere when agents.list has
+   not answered yet, so a project made in the first second of a launch is not
+   born empty. */
+function agentSet() {
+  let ids = LIVE.agents.map((a) => a.id);
+  if (!ids.length) ids = [...new Set(PREFS.projects.flatMap((p) => p.roster || []))];
+  if (!ids.includes('main')) ids = ['main', ...ids];
+  return ['main', ...ids.filter((id) => id !== 'main')];
+}
+
+const projectSlug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-|-$/g, '') || 'x';
+
+/* Mint an id in the same shape Prefs.isValidProjectID accepts. A collision just
+   counts up: two projects both called "Atlas" are a thing he is allowed to do. */
+function newProjectId(name) {
+  const base = 'p-' + projectSlug(name);
+  const taken = new Set(PREFS.projects.map((p) => p.id));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(base + '-' + n)) n += 1;
+  return base + '-' + n;
+}
+
+/* CREATING A PROJECT CLONES THE AGENT SET INTO IT. Returns the new id. */
+function projectCreate(name) {
+  requireUserIntent('create a project');
+  const clean = String(name || '').trim();
+  if (!clean) return null;
+  const id = newProjectId(clean);
+  PREFS.projects.push({ id, name: clean, roster: agentSet() });
   savePrefs();
-  return rec;
+  return id;
+}
+
+/* Removing a project removes its clones' rooms with it — Room.setProjects drops
+   the transcript on the native side. There was no way to remove one at all
+   before this; a list you can only add to is a list that fills with mistakes. */
+function projectRemove(id) {
+  requireUserIntent('remove a project');
+  const i = PREFS.projects.findIndex((p) => p.id === id);
+  if (i < 0) return false;
+  PREFS.projects.splice(i, 1);
+  savePrefs();
+  return true;
+}
+
+/* New agents appearing on the gateway join every existing project, because a
+   project holds a FULL set of agents and "full" has to keep meaning that. This
+   is not a user action and deliberately does not go through the intent gate: it
+   adds agents to existing projects and can never create one. */
+function reconcileRosters() {
+  if (!PREFS.loaded || !LIVE.agents.length) return false;
+  const want = agentSet();
+  let changed = false;
+  for (const p of PREFS.projects) {
+    const have = new Set(p.roster || []);
+    const missing = want.filter((id) => !have.has(id));
+    if (!missing.length && (p.roster || [])[0] === 'main') continue;
+    p.roster = ['main', ...[...(p.roster || []), ...missing].filter((id) => id !== 'main')];
+    changed = true;
+  }
+  if (changed) savePrefs();
+  return changed;
 }
 
 /* app.js's clock is seconds relative to page load; the Gateway speaks epoch ms. */
@@ -649,30 +747,38 @@ function agentFor(row) {
   };
 }
 
-/* ───────────────────────── categories ─────────────────────────
-   Three sections, all drawn from real facts:
+/* ───────────────────────── projects ─────────────────────────
+   ONE SECTION, because there is one kind of thing: a project.
 
-     Projects — the gateway's own session groups (`sessions.groups.list`, which
-                is what the `category` field on a row refers to), plus any
-                project made here. A gateway group with no live sessions still
-                appears: it exists on the gateway whether or not anything is
-                running in it, and hiding it would make "add a project" look
-                like it did nothing.
-     Tools    — Bridge's own tool tabs, from prefs. Education ships as the first.
-     Agents   — one per agent id, holding that agent's ungrouped sessions. Kept
-                from Phase A: a live session that belongs to no group still has
-                to be reachable, and dropping it would be a regression.
+   A project is the unit of isolation. It owns a full set of agent CLONES, each
+   a real gateway session keyed `agent:<agentId>:bridge:<projectId>`, and its
+   tabs are:
+
+     main   FIRST — the room. The project's own chat: where Chancellor talks to
+            the project and where its agents talk to each other and ping each
+            other. Talking here with no ping goes to this project's `main`
+            clone, which is why the room and main's tab are the same tab rather
+            than two tabs showing two halves of one conversation.
+     …then  one tab per agent in the project, each showing that clone's session.
+
+   WHAT IS NO LONGER HERE, AND WHY
+
+     * Gateway session groups no longer become projects. That was the door an
+       agent could walk through — set a session's `category` and a project
+       appeared — and closing it is what makes "he creates projects" true rather
+       than merely intended. It is also what removed "Diagnostics", which was a
+       gateway group nobody asked to see in a sidebar.
+     * The top-level AGENTS section is gone. Agents live under projects only.
+     * Tool tabs are gone with the TOOLS section.
 
    A SESSION APPEARS IN EXACTLY ONE CATEGORY. app.js's agentById searches every
    category and returns the first hit, so the same session in two places makes
-   navigation ambiguous — which is also why a tool tab does not adopt sessions
-   that already belong to a project. See rosterApply below.
+   navigation ambiguous. A clone key names exactly one project, so this now
+   holds by construction rather than by care.
 
-   ROSTERS. A category with an empty roster shows every session it holds, which
-   is Phase A's behaviour and stays the default. A category with a roster shows
-   the chosen agents as its top tabs: each agent's sessions here if it has any,
-   and otherwise one placeholder tab that says so rather than a tab that is
-   missing without explanation. */
+   A session that belongs to no clone — a cron run, a dashboard session, an
+   ad-hoc spawn — is not in any project and is not shown here. It is not lost:
+   the INBOX is the cross-project view and reports on all of them. */
 
 /* A tab for a rostered agent with no session behind it. `planned` is app.js's
    existing vocabulary for "no session exists", and PlanBody already renders it
@@ -702,100 +808,125 @@ function placeholderAgent(agentId, catId, why) {
   };
 }
 
-/* Apply a category's roster to the sessions it holds. */
-function rosterApply(cat, roster) {
-  if (!roster || !roster.length) return cat.agents;
-  const keep = cat.agents.filter((a) => roster.includes(a.lane));
-  const have = new Set(keep.map((a) => a.lane));
-  const out = [...keep];
-  for (const id of roster) {
-    if (have.has(id)) continue;
-    const ph = placeholderAgent(id, cat.id, 'No session for this agent in ' + cat.name + ' yet.');
-    // The empty pane has to say what it would hold. A tool tab carries that
-    // sentence as data (Prefs.defaultToolTabs writes Education's); a project
-    // falls back to the general one. Either way the pane is never blank.
-    ph.plan = { purpose: cat.note || (cat.kind === 'tool'
-      ? cat.name + ' has no session for ' + agentLabel(id) + '. Nothing inside a tool tab is '
-        + 'built in this version — this tab is the agent, its roster slot, and the session it '
-        + 'would open. Selecting it once a session exists shows that session\'s real transcript.'
-      : agentLabel(id) + ' is rostered for ' + cat.name + ' but has no session in this project. '
-        + 'It gets a tab so the roster is visibly complete rather than silently short.') };
+/* The clone session key. MUST match Room.key(_:project:) in Room.swift — the
+   two halves of the app find the same session by building the same string, and
+   a drift here is a room that silently talks to nobody. */
+const cloneKey = (agentId, projectId) => 'agent:' + agentId + ':bridge:' + projectId;
+
+/* THE ROOM TAB. First tab in every project, id `<projectId>::room`.
+
+   It is main's tab and the room at once, which is not a compromise: an unpinged
+   message in the room is delivered to this project's `main` clone, so the room
+   transcript and main's session are two views of one conversation. Giving them
+   separate tabs would ask Chancellor to guess which one a reply landed in.
+
+   It carries main's real row when there is one, so the tab's status dot and
+   token counts are the clone's actual state rather than a decoration. */
+function roomTabFor(proj) {
+  const row = LIVE.rows.get(cloneKey('main', proj.id));
+  const base = row ? agentFor(row)
+    : placeholderAgent('main', proj.id,
+        'Nothing has been said in ' + proj.name + ' yet. Type below to start.');
+  return {
+    ...base,
+    id: proj.id + '::room',
+    agentId: proj.id + '::room',
+    lane: 'main',
+    parent: null,
+    kind: 'room',
+    project: proj.id,
+    sessionKey: cloneKey('main', proj.id),
+  };
+}
+
+/* One tab per rostered agent, in roster order, `main` excluded because its tab
+   IS the room and the room is prepended separately.
+
+   A rostered agent with no session yet still gets a tab. That is the honest
+   shape of a clone set: the project holds the agent whether or not anything has
+   been said to it, and a tab that is simply missing reads as a bug. */
+function rosterApply(proj, rows) {
+  const out = [];
+  for (const id of proj.roster) {
+    if (id === 'main') continue;                 // the room tab, prepended below
+    const key = cloneKey(id, proj.id);
+    const row = rows.get(key);
+    if (row) { out.push(agentFor(row)); continue; }
+    const ph = placeholderAgent(id, proj.id, 'No session for this agent in ' + proj.name + ' yet.');
+    ph.plan = { purpose: agentLabel(id) + ' is one of ' + proj.name + '\'s agents and has not been '
+      + 'spoken to in this project yet. It is a real, separate clone: its session key is '
+      + cloneKey(id, proj.id) + ', its memory is private to it here, and the same agent working '
+      + 'in another project is a different session that shares none of this one\'s state. '
+      + 'Ping @' + id + ' from the room, or type below, and the session is created on the first '
+      + 'message.' };
     out.push(ph);
   }
-  // Roster order is the user's chosen tab order, and placeholders sort with it.
-  return out.sort((a, b) => roster.indexOf(a.lane) - roster.indexOf(b.lane));
+  return out;
 }
 
 function buildCategories() {
-  const rows = [...LIVE.rows.values()]
-    .filter((r) => !r.archived)
-    .sort((a, b) => (b.lastInteractionAt || b.updatedAt || 0) - (a.lastInteractionAt || a.updatedAt || 0));
+  const rows = [...LIVE.rows.values()].filter((r) => !r.archived);
+  const byKey = new Map(rows.map((r) => [r.key, r]));
 
-  const groups = new Map();   // catId -> { id, name, kind, rows: [] }
-  const put = (id, name, kind, row) => {
-    if (!groups.has(id)) groups.set(id, { id, name, kind, rows: [] });
-    if (row) groups.get(id).rows.push(row);
-  };
-
-  // Every gateway group, whether or not it currently holds a session.
-  for (const g of LIVE.groups) put('g-' + slug(g.name), g.name, 'project', null);
-  for (const row of rows) {
-    if (row.category) put('g-' + slug(row.category), row.category, 'project', row);
-    else put('a-' + slug(row.agentId), titleCase(row.agentId), 'agent', row);
-  }
-  // Projects made in Bridge. They hold no gateway sessions of their own — a
-  // session joins a group by carrying its `category`, and setting that needs
-  // operator.write — so they are real, persistent, rosterable, and honest about
-  // being empty until that scope exists. The UI says exactly this.
-  for (const proj of PREFS.projects) {
-    if (proj.id.startsWith('p-')) put(proj.id, proj.name, 'project', null);
-  }
-  for (const tab of PREFS.toolTabs) put(tab.id, tab.name, 'tool', null);
+  // New agents on the gateway join every project, so "a full set" keeps meaning
+  // what it says. Never creates a project — see reconcileRosters.
+  reconcileRosters();
 
   const cats = [];
-  for (const g of groups.values()) {
-    const keys = new Set(g.rows.map((r) => r.key));
-    const agents = g.rows.map(agentFor);
-    for (const a of agents) {
-      const parentKey = a._row.parentSessionKey || a._row.spawnedBy;
-      if (parentKey && parentKey !== a.id && keys.has(parentKey)) a.parent = parentKey;
+  for (const proj of PREFS.projects) {
+    const roster = (proj.roster && proj.roster.length) ? proj.roster : agentSet();
+    const p = { ...proj, roster };
+    const agents = [roomTabFor(p), ...rosterApply(p, byKey)];
+
+    /* Subagents. A session spawned BY one of this project's clones belongs to
+       that clone and splits its pane, exactly as before — that is how the real
+       work stays visible without giving every spawn a top-level tab. Attached
+       by PARENT KEY, so a spawn can only ever land in the project whose clone
+       made it. */
+    const tabByKey = new Map();
+    for (const a of agents) if (a.sessionKey) tabByKey.set(a.sessionKey, a.id);
+    for (const row of rows) {
+      const parentKey = row.parentSessionKey || row.spawnedBy;
+      if (!parentKey || !tabByKey.has(parentKey)) continue;
+      if (tabByKey.has(row.key)) continue;        // a clone is not its own child
+      const kid = agentFor(row);
+      kid.parent = tabByKey.get(parentKey);
+      agents.push(kid);
     }
-    const cat = { id: g.id, name: g.name, kind: g.kind, repo: null, branch: null,
-                  planned: false, agents };
-    const rec = prefFor(g.id);
-    cat.roster = (rec && rec.roster) || [];
-    cat.note = (rec && rec.note) || '';
-    cat.local = g.id.startsWith('p-');
-    cat.agents = rosterApply(cat, cat.roster);
+
+    const cat = { id: p.id, name: p.name, kind: 'project', repo: null, branch: null,
+                  planned: false, agents, roster, note: '', local: true };
 
     const real = cat.agents.filter((a) => !a._placeholder);
     const running = real.filter((a) => a.status === 'running').length;
     const failed = real.filter((a) => a.status === 'failed').length;
-    const n = real.length;
-    cat.subtitle = (n ? n + (n === 1 ? ' session' : ' sessions') : 'no sessions')
+    const n = roster.length;
+    cat.subtitle = n + (n === 1 ? ' agent' : ' agents')
       + (running ? ' · ' + running + ' running' : '')
-      + (failed ? ' · ' + failed + ' failed' : '')
-      + (cat.roster.length ? ' · roster of ' + cat.roster.length : '');
+      + (failed ? ' · ' + failed + ' failed' : '');
     cats.push(cat);
   }
 
-  // Projects, then tools, then agent lanes; inside each, busiest first.
-  const order = (c) => (c.kind === 'project' ? 0 : c.kind === 'tool' ? 1 : 2);
-  cats.sort((a, b) => order(a) - order(b)
-    || (b.agents.filter((x) => x.status === 'running').length - a.agents.filter((x) => x.status === 'running').length)
-    || a.name.localeCompare(b.name));
-
-  // LANES, rebuilt to exactly the set of live sessions.
+  // His order, not ours. Projects are a short hand-made list and re-sorting it
+  // by activity would move the thing you were about to click.
+  // LANES, rebuilt to exactly the set of tabs that exist.
   for (const k of Object.keys(LANES)) delete LANES[k];
   for (const c of cats) {
     for (const a of c.agents) {
-      LANES[a.agentId] = { name: a._placeholder ? agentLabel(a.lane) : laneNameFor(a._row),
-                           glyph: glyphFor(a.lane) };
+      LANES[a.agentId] = { name: a.kind === 'room' ? c.name + ' · room'
+                             : (a._placeholder ? agentLabel(a.lane) : laneNameFor(a._row)),
+                           glyph: a.kind === 'room' ? 'ROOM' : glyphFor(a.lane) };
     }
   }
-  // Every real agent on the gateway is addressable by its own id too — that is
-  // what a ping bubble targets, and what "@lane" resolves against.
-  for (const a of LIVE.agents) if (!LANES[a.id]) LANES[a.id] = { name: a.name, glyph: glyphFor(a.id) };
+  // Every agent in a project is addressable by its own id too — that is what a
+  // ping bubble targets, and what "@lane" resolves against. Drawn from the
+  // ROSTERS rather than from LIVE.agents: an agent the gateway has but no
+  // project holds is not a thing anything here can address.
+  for (const c of cats) {
+    for (const id of c.roster) {
+      if (!LANES[id]) LANES[id] = { name: agentLabel(id), glyph: glyphFor(id) };
+    }
+  }
 
   CATEGORIES.length = 0;
   CATEGORIES.push(...cats);
@@ -803,28 +934,25 @@ function buildCategories() {
      here, and Phase B walked into the second one:
 
        1. `hasActiveRun` is per-turn, so a busy session can read idle for the
-          second the snapshot is taken — hence "running, else most recently
-          touched", and only ever on the FIRST snapshot: after that the
-          selection is the user's and is not moved.
+          second the snapshot is taken — hence "running, else the first project",
+          and only ever on the FIRST snapshot: after that the selection is the
+          user's and is not moved.
        2. `cats.length` is not the same as "there is anything to look at".
-          Preferences arrive before the session list does, and prefs alone
-          produce the tool tabs — so the first non-empty build can be nothing
-          but Education, full of rostered placeholders. Bridge duly picked it
-          and every launch opened on an empty tab while 27 live sessions sat
-          one click away. The gate is a real session, not a category. */
-  const hasReal = cats.some((c) => c.agents.some((a) => !a._placeholder));
-  if (!pickedInitial && hasReal) {
+          Preferences arrive before the session list does, so the first non-empty
+          build is a full set of projects made entirely of placeholders. That is
+          fine to land on now — unlike Phase B's tool tabs, a project with no
+          sessions is still the right place to start typing — so the gate is
+          simply "there is a project", and a running clone wins if one exists. */
+  if (!pickedInitial && cats.length) {
     pickedInitial = true;
     const busy = cats.find((c) => c.agents.some((a) => a.status === 'running' && !a._placeholder));
-    const anyReal = cats.find((c) => c.agents.some((a) => !a._placeholder));
-    S.catId = (busy || anyReal || cats[0]).id;
+    S.catId = (busy || cats[0]).id;
   }
+  /* THE SIDEBAR, EXACTLY: Inbox (drawn by app.js above the sections, because it
+     is not a project) and PROJECTS. No Room — a room belongs to a project now.
+     No top-level agent list — agents live under projects only. */
   NAV_SECTIONS.length = 0;
-  const ids = (k) => cats.filter((c) => c.kind === k).map((c) => c.id);
-  NAV_SECTIONS.push({ title: 'Projects', ids: ids('project'), add: 'project' });
-  NAV_SECTIONS.push({ title: 'Tools', ids: ids('tool'), add: 'tool' });
-  const lanes = ids('agent');
-  if (lanes.length) NAV_SECTIONS.push({ title: 'Agents', ids: lanes });
+  NAV_SECTIONS.push({ title: 'Projects', ids: cats.map((c) => c.id), add: 'project' });
   buildInbox();
 }
 
@@ -868,32 +996,47 @@ const slug = (s) => String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(
    human in it is not something to cap quietly. */
 
 const ROOM = {
-  messages: [],
-  paused: false,
-  pauseReason: '',
-  agents: [],          // [{id, name, key}] — the gateway's real roster
+  /* projectId -> { messages, paused, pauseReason, agents, relaysInWindow }.
+     Every project's room is held at once, because switching projects must not
+     wait on a round trip to find out what was said in the one you just opened. */
+  byProject: Object.create(null),
   maxHops: 6,
   maxRelays: 0,
   relayWindowMin: 5,
-  relaysInWindow: 0,
+  sharedMemory: '',
+  memoryRoot: '',
   loaded: false,
 };
 
-function roomSend() {
+const EMPTY_ROOM = { messages: [], paused: false, pauseReason: '', agents: [], relaysInWindow: 0 };
+
+/* The room for a project. Never null: a project that has never been spoken in
+   has an EMPTY room, not a missing one, and every caller would otherwise carry
+   the same guard. */
+function roomOf(projectId) {
+  return (projectId && ROOM.byProject[projectId]) || EMPTY_ROOM;
+}
+
+/* The room is always the room OF a project — there is no global room to fall
+   back to — so a send with no project is dropped rather than delivered into
+   whichever transcript happened to be first. */
+function roomSend(projectId) {
   const text = (S.roomDraft || '').trim();
-  if (!text) return;
+  if (!text || !projectId) return;
   const ping = S.roomPing || null;
-  if (!bridgeSend({ t: 'room.send', text, ping })) {
-    ROOM.messages = ROOM.messages.concat([{
-      id: 'local-' + Date.now(), at: Date.now(), from: 'bridge', to: null, kind: 'error', hop: 0,
+  if (!bridgeSend({ t: 'room.send', text, ping, project: projectId })) {
+    const r = ROOM.byProject[projectId]
+      || (ROOM.byProject[projectId] = { ...EMPTY_ROOM, messages: [], agents: [] });
+    r.messages = r.messages.concat([{
+      id: 'local-' + Date.now(), at: Date.now(), from: 'bridge', to: [], kind: 'error', hop: 0,
       text: 'Bridge is not running inside the native shell, so there is no socket to relay on.',
     }]);
   }
   S.roomDraft = '';
   renderAll();
 }
-const roomPause = (p) => bridgeSend({ t: 'room.pause', paused: p });
-const roomClear = () => bridgeSend({ t: 'room.clear' });
+const roomPause = (projectId, p) => bridgeSend({ t: 'room.pause', paused: p, project: projectId });
+const roomClear = (projectId) => bridgeSend({ t: 'room.clear', project: projectId });
 
 /* ───────────────────────── §Q  answering a question ─────────────────────────
    Two ids, and they are different strings: the RECORD id addresses the record,
@@ -1079,10 +1222,12 @@ window.__bridgeEmit = function (msg) {
         // PREFS.loaded, and savePrefs() refuses to write until it is set — so
         // the boot race cannot round-trip an empty document over real data.
         const p = msg.prefs || {};
-        PREFS.version = p.version || 1;
+        PREFS.version = p.version || 2;
         PREFS.sshHost = p.sshHost || 'atlas';
+        // Swift has already sanitised this — v1's tool tabs dropped, `g-` ids
+        // renamed, leaked screenshot fixtures purged — so the page takes what
+        // was actually STORED rather than what it last sent.
         PREFS.projects = Array.isArray(p.projects) ? p.projects : [];
-        PREFS.toolTabs = Array.isArray(p.toolTabs) ? p.toolTabs : [];
         PREFS.inboxRead = Array.isArray(p.inboxRead) ? p.inboxRead : [];
         PREFS.loaded = true;
         LIVE.prefsPath = msg.path || '';
@@ -1129,14 +1274,27 @@ window.__bridgeEmit = function (msg) {
         break;
 
       case 'room': {
-        ROOM.messages = msg.messages || [];
-        ROOM.paused = !!msg.paused;
-        ROOM.pauseReason = msg.pauseReason || '';
-        ROOM.agents = msg.agents || [];
+        // WHOLE-STORE REPLACEMENT, keyed by project. A project whose room is
+        // absent from the payload no longer exists — Room.setProjects dropped it
+        // — so rebuilding the map rather than merging into it is what makes
+        // removing a project actually remove its transcript from the page.
+        const next = Object.create(null);
+        for (const pid of Object.keys(msg.rooms || {})) {
+          const r = msg.rooms[pid] || {};
+          next[pid] = {
+            messages: r.messages || [],
+            paused: !!r.paused,
+            pauseReason: r.pauseReason || '',
+            agents: r.agents || [],
+            relaysInWindow: r.relaysInWindow || 0,
+          };
+        }
+        ROOM.byProject = next;
         ROOM.maxHops = msg.maxHops || ROOM.maxHops;
         ROOM.maxRelays = msg.maxRelays || 0;
         ROOM.relayWindowMin = msg.relayWindowMin || 5;
-        ROOM.relaysInWindow = msg.relaysInWindow || 0;
+        ROOM.sharedMemory = msg.sharedMemory || ROOM.sharedMemory;
+        ROOM.memoryRoot = msg.memoryRoot || ROOM.memoryRoot;
         ROOM.loaded = true;
         break;
       }

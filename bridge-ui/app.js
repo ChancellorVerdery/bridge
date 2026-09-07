@@ -133,9 +133,9 @@ const S = {
   view: 'sessions',  // 'sessions' | 'room' | 'inbox' | 'settings'
   write: null,       // the in-flight / just-answered gateway write — see live.js §W
   ping: {},          // catId -> agent id the composer is pinging, or null
-  customize: null,   // catId whose roster picker is open
-  newName: '',       // the add-a-project / add-a-tool-tab field
-  adding: null,      // 'project' | 'tool' | null
+  newName: '',       // the add-a-project field
+  adding: null,      // 'project' | null
+  removing: null,    // projectId whose "remove?" confirmation is showing
 
   /* ── Phase C ── the room */
   roomDraft: '',     // the main chat composer
@@ -225,7 +225,9 @@ const ICONS = {
   gear: '<svg class="nav__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M12 2.6v2.3M12 19.1v2.3M21.4 12h-2.3M4.9 12H2.6M18.6 5.4l-1.6 1.6M7 17l-1.6 1.6M18.6 18.6 17 17M7 7 5.4 5.4"/></svg>',
 };
 const CAT_ICON = { atlasv4: 'work', calcnotes: 'notes', education: 'study' };
-const CRUMB_KIND = { project: 'Projects', tool: 'Tools', agent: 'Agents' };
+/* One kind of category now, so the crumb is a constant rather than a lookup
+   that used to file Education under "Agents" when it missed. */
+const CRUMB_KIND = 'Projects';
 
 /* BRIDGE: LANES is rebuilt from the live session list on every snapshot, so a
    render that races a row's arrival must not throw on a missing entry. The
@@ -412,22 +414,16 @@ function Alarm() {
 
 /* BRIDGE: v4's "Simulate" popover drove the mock corpus. There is no mock
    corpus, so it is gone rather than left as a dead button. */
-function TopbarActions(cat) {
+/* There is no "Customize" any more. A project holds a FULL set of agent clones
+   by definition — that is what makes it the unit of isolation — so a picker that
+   let you deselect some of them would be a control for making the invariant
+   false. Agents join a project by existing on the gateway; see
+   `reconcileRosters` in live.js. */
+function TopbarActions() {
   const live = allAgents().filter((a) => !a._placeholder);
   const c = counts(live);
   const worstStale = Math.max(0, ...live.filter((a) => a.status === 'running').map(staleFor));
-  const out = [StateSummary(S.connection, c, worstStale)];
-  // Customize belongs to a project or a tool tab, not to the agent-lane
-  // sections — those are the gateway's own grouping and Bridge does not get to
-  // re-roster them.
-  if (cat && (cat.kind === 'project' || cat.kind === 'tool')) {
-    out.push(h('button.action-btn.mc-cust', {
-      class: S.customize === cat.id ? 'is-active' : '',
-      title: 'Choose which agents appear as tabs in ' + cat.name,
-      onclick: () => { S.customize = S.customize === cat.id ? null : cat.id; renderAll(); },
-    }, 'Customize'));
-  }
-  return out;
+  return [StateSummary(S.connection, c, worstStale)];
 }
 
 /* ───────────────────────── navigator ─────────────────────────
@@ -460,27 +456,13 @@ function Nav() {
           h('span.nav__label', 'Inbox'),
           unread ? h('span.plug-badge.nav__unread', unread) : null),
         h('span.nav__sub', inboxSub())),
-      h('span.nav__dot')),
-    /* The room is the main chat, so it sits at the top with the inbox rather
-       than inside Projects — it is not a project, and filing it under one would
-       say something false about what it is. Its subtitle reports the relay
-       state, because a paused relay is a thing you need to see from anywhere in
-       the app, not only from inside the room. */
-    h('a.nav__item', {
-      class: S.view === 'room' ? 'is-active' : '',
-      href: '#/room',
-      'aria-current': S.view === 'room' ? 'true' : 'false',
-      title: 'The shared main chat. Unpinged goes to main; a ping goes to that lane.',
-      onclick: (ev) => { ev.preventDefault(); openRoom(); },
-    },
-      h('span.mc-ico', { html: ICONS.room }),
-      h('span.nav__col',
-        h('span.nav__row',
-          h('span.nav__label', 'Room'),
-          (typeof ROOM !== 'undefined' && ROOM.paused)
-            ? h('span.plug-badge.nav__fail', 'paused') : null),
-        h('span.nav__sub', roomSub())),
       h('span.nav__dot'))));
+  /* THERE IS NO "ROOM" ENTRY HERE, and that is the point of this pass. A room
+     belongs to a PROJECT now — it is that project's first tab — so a single
+     global Room in the sidebar would be a link to a conversation that no longer
+     exists. Inbox is the only cross-project view, and it stays above the
+     sections because it is not a project and filing it under one would say
+     something false about what it is. */
 
   for (const sec of NAV_SECTIONS) {
     const box = h('div.nav__sec', h('p.nav__head', { 'data-enter': 'navhead:' + sec.title }, sec.title));
@@ -493,61 +475,83 @@ function Nav() {
       const bits = [];
       if (k.running) bits.push(h('em', k.running + ' running'));
       if (k.waiting) bits.push(h('i', k.waiting + ' waiting'));
-      if (!bits.length) bits.push(real.length ? 'idle' : 'no sessions');
-      if (c.roster && c.roster.length) bits.push('roster ' + c.roster.length);
+      // A project's line reports its ROOM and its clone count, because those
+      // are the two things that tell you whether to open it. "no sessions" was
+      // Phase B's answer and it is now always wrong in the same way: a project
+      // always has its full set of clones, whether or not any has been spoken to.
+      const room = typeof roomOf === 'function' ? roomOf(c.id) : null;
+      if (room && room.messages.length) {
+        const last = room.messages[room.messages.length - 1];
+        const who = last.from === 'chancellor' ? 'you'
+          : last.from === 'bridge' ? 'Bridge' : last.from;
+        bits.push(room.messages.length + ' in room · last from ' + who);
+      } else if (!bits.length) {
+        bits.push(real.length ? 'idle' : 'nothing said yet');
+      }
+      if (c.roster && c.roster.length) bits.push(c.roster.length + ' agents');
       bits.forEach((b, i) => { if (i) sub.append(' · '); sub.append(b); });
-      box.append(h('a.nav__item', {
-        class: c.id === S.catId && S.view === 'sessions' ? 'is-active' : '',
-        href: '#/' + c.id,
-        'aria-current': c.id === S.catId && S.view === 'sessions' ? 'true' : 'false',
-        onclick: (ev) => { ev.preventDefault(); selectCat(c.id); },
-      },
-        h('span.mc-ico', { html: ICONS[CAT_ICON[c.id]] || (c.kind === 'tool' ? ICONS.study : ICONS.work) }),
-        h('span.nav__col',
-          h('span.nav__row',
-            h('span.nav__label', c.name),
-            k.failed ? h('span.plug-badge.nav__fail', k.failed) : null),
-          sub),
-        h('span.nav__dot')));
+
+      const active = c.id === S.catId && S.view === 'sessions';
+      box.append(h('div.nav__wrap',
+        h('a.nav__item', {
+          class: active ? 'is-active' : '',
+          href: '#/' + c.id,
+          'aria-current': active ? 'true' : 'false',
+          onclick: (ev) => { ev.preventDefault(); selectCat(c.id); },
+        },
+          h('span.mc-ico', { html: ICONS[CAT_ICON[c.id]] || ICONS.work }),
+          h('span.nav__col',
+            h('span.nav__row',
+              h('span.nav__label', c.name),
+              (room && room.paused) ? h('span.plug-badge.nav__fail', 'paused')
+                : k.failed ? h('span.plug-badge.nav__fail', k.failed) : null),
+            sub),
+          h('span.nav__dot')),
+        /* REMOVE. There was no way to remove a project at all — a list you can
+           only add to is a list that fills with mistakes, and two of them
+           ("Diagnostics", "Empty Project") had been sitting in this sidebar for
+           days with no control that could take them out. Two-step, because
+           removing a project drops its rooms with it and that is not something
+           to do on one stray click. */
+        S.removing === c.id
+          ? h('div.nav__rm',
+              h('span', 'Remove ' + c.name + ' and its rooms?'),
+              h('button.add-go', { onclick: fromUser(() => { removeProject(c.id); }) }, 'Remove'),
+              h('button.add-x', { onclick: () => { S.removing = null; renderAll(); } }, '×'))
+          : h('button.nav__rm-b', {
+              title: 'Remove ' + c.name,
+              'aria-label': 'Remove ' + c.name,
+              onclick: (ev) => { ev.preventDefault(); S.removing = c.id; renderAll(); },
+            }, '×')));
     }
 
-    /* Add-a-project / add-a-tool-tab. Inline in the section it adds to, because
-       a "+" in a toolbar somewhere else is a control you have to go looking
-       for. Creating one is a LOCAL act — see the note it writes on the empty
-       category — so it takes effect immediately and persists. */
+    /* Add a project. Inline in the section it adds to, because a "+" in a
+       toolbar somewhere else is a control you have to go looking for.
+       `fromUser` is not decoration: it sets the intent token that
+       `projectCreate` requires, and it is the only place in the app that does.
+       See live.js, door 2. */
     if (sec.add) {
       if (S.adding === sec.add) {
         const input = h('input.add-in', {
           value: S.newName, autofocus: true,
-          placeholder: sec.add === 'project' ? 'Project name…' : 'Tool tab name…',
+          placeholder: 'Project name…',
           oninput: (ev) => { S.newName = ev.target.value; },
-          onkeydown: (ev) => {
-            if (ev.key === 'Enter') { ev.preventDefault(); commitAdd(sec.add); }
+          onkeydown: fromUser((ev) => {
+            if (ev.key === 'Enter') { ev.preventDefault(); commitAdd(); }
             if (ev.key === 'Escape') { S.adding = null; S.newName = ''; renderAll(); }
-          },
+          }),
         });
         box.append(h('div.add-row', input,
-          h('button.add-go', { onclick: () => commitAdd(sec.add) }, 'Add'),
+          h('button.add-go', { onclick: fromUser(() => commitAdd()) }, 'Add'),
           h('button.add-x', { onclick: () => { S.adding = null; S.newName = ''; renderAll(); } }, '×')));
       } else {
         box.append(h('button.nav__add', {
           onclick: () => { S.adding = sec.add; S.newName = ''; renderAll(); },
-        }, h('span', '+'), sec.add === 'project' ? 'New project' : 'New tool tab'));
+        }, h('span', '+'), 'New project'));
       }
     }
     nav.append(box);
   }
-}
-
-/* The line under "Room". Reports the shape of the conversation, not a count of
-   nothing: a room with no messages says what it is for. */
-function roomSub() {
-  if (typeof ROOM === 'undefined' || !ROOM.loaded) return 'starting';
-  const n = ROOM.messages.length;
-  if (!n) return (ROOM.agents.length || 9) + ' agents · nothing said yet';
-  const last = ROOM.messages[n - 1];
-  const who = last.from === 'chancellor' ? 'you' : last.from === 'bridge' ? 'Bridge' : last.from;
-  return n + (n === 1 ? ' message' : ' messages') + ' · last from ' + who;
 }
 
 /* The line under "Inbox". It reports the real shape of the feed rather than a
@@ -1200,39 +1204,51 @@ const roomAt = (ms) => (ms - T0) / 1000;
 
    Both render `.page-tab`; both carry `.is-active` for the current selection;
    neither has a colour of its own. */
-function AgentStrip(mode) {
+function AgentStrip(mode, cat) {
   const el = h('nav.page-tabs.agent-strip', { 'data-mode': mode });
-  const roster = (typeof ROOM !== 'undefined' && ROOM.agents.length)
-    ? ROOM.agents
-    : (LIVE.agents || []).map((a) => ({ id: a.id, name: a.name, key: 'agent:' + a.id + ':bridge' }));
+  /* THE PROJECT'S OWN ROSTER, and nothing wider. This strip is how a ping is
+     chosen, so what it offers IS the set of agents reachable from here — and an
+     agent in another project must not be offerable, because Room.deliver would
+     refuse it and the refusal would read as Bridge being broken rather than as
+     isolation working. Drawn from the room payload when it has arrived (it
+     carries the real session key per clone) and from the category's roster
+     before that. */
+  const room = roomOf(cat && cat.id);
+  const roster = room.agents.length
+    ? room.agents
+    : ((cat && cat.roster) || []).map((id) => ({
+        id, name: agentLabel(id), key: 'agent:' + id + ':bridge:' + (cat ? cat.id : ''),
+      }));
 
   if (mode === 'ping') {
     el.append(h('button.page-tab.ping-b', {
       class: S.roomPing ? '' : 'is-active',
       'data-none': '1',
       'aria-pressed': S.roomPing ? 'false' : 'true',
-      title: 'Unpinged. The message goes to main (Thuban) and to nobody else.',
+      title: 'Unpinged. The message goes to this project’s main (Thuban) and to nobody else.',
       onclick: () => { S.roomPing = null; renderAll(); },
     }, 'no ping → main'));
   }
 
   for (const ag of roster) {
     if (mode === 'ping' && ag.id === 'main') continue;    // "no ping" already IS main
-    const live = agentById(ag.key);
+    const live = cat && cat.agents.find((a) => a.sessionKey === ag.key && !a.parent);
     const active = mode === 'ping' ? S.roomPing === ag.id : false;
     el.append(h(mode === 'ping' ? 'button.page-tab.ping-b' : 'a.page-tab', {
       class: active ? 'is-active' : '',
-      href: mode === 'nav' ? '#/room' : null,
+      href: mode === 'nav' && cat ? '#/' + cat.id : null,
       'aria-pressed': mode === 'ping' ? (active ? 'true' : 'false') : null,
       'data-id': ag.id,
       title: mode === 'ping'
-        ? 'Ping ' + ag.id + ' — this message goes to that lane and main does not see it.'
-        : (live ? 'Open ' + ag.name + '’s room thread — the real session Bridge relays into.'
-                : ag.name + ' has no room session yet. One is created the first time it is pinged.'),
+        ? 'Ping ' + ag.id + ' — this message goes to that clone in ' + (cat ? cat.name : 'this project')
+          + ', and main does not see it.'
+        : (live ? 'Open ' + ag.name + '’s tab — the real session Bridge relays into.'
+                : ag.name + ' has no session in this project yet. One is created the first '
+                  + 'time it is pinged.'),
       onclick: (ev) => {
         ev.preventDefault();
         if (mode === 'ping') { S.roomPing = ag.id; renderAll(); return; }
-        openRoomThread(ag);
+        openRoomThread(cat, ag);
       },
     },
       live ? TabMark(live.status, isStale(live)) : h('span.tmark', { 'data-s': 'planned', 'data-stale': '0' }),
@@ -1242,64 +1258,76 @@ function AgentStrip(mode) {
   return el;
 }
 
-/* Open the real gateway session behind one room tab. A lane that has never been
-   pinged has no session yet — `chat.send` creates it on first use — and saying
-   so is better than navigating nowhere. */
-function openRoomThread(ag) {
-  const live = agentById(ag.key);
+/* Open the tab behind one clone. A clone that has never been pinged has no
+   session yet — `chat.send` creates it on first use — and saying so is better
+   than navigating nowhere. */
+function openRoomThread(cat, ag) {
+  if (!cat) return;
+  const live = cat.agents.find((a) => a.sessionKey === ag.key && !a.parent)
+            || cat.agents.find((a) => a.lane === ag.id && !a.parent);
+  // A placeholder IS a tab — the clone exists as a roster slot whether or not a
+  // session has been created — so navigating to it is right, and the notice
+  // below is only for a lane this project does not hold at all.
   if (!live) {
     S.notice = { k: 'info', agentId: null,
-      text: ag.name + ' has no room session yet. Bridge creates ' + ag.key
+      text: ag.name + ' has no session in ' + cat.name + ' yet. Bridge creates ' + ag.key
         + ' the first time you ping that lane.' };
     renderAll();
     setTimeout(() => { S.notice = null; renderAll(); }, 6000);
     return;
   }
-  const cat = catOf(ag.key);
-  if (!cat) return;
-  jumpTo(cat.id, ag.key);
+  jumpTo(cat.id, live.id);
 }
 
-function RoomView() {
-  const pane = h('section.pane.room', { 'data-role': 'room' });
-  const paused = ROOM.paused;
+/* THE ROOM IS A PROJECT'S FIRST TAB. It renders inside the ordinary sessions
+   shell rather than as its own view, which is what makes "main FIRST, then one
+   tab per agent" true of the actual markup: the room is tab zero, not a
+   destination somewhere else in the app. */
+function RoomView(cat) {
+  const pane = h('section.pane.room', { 'data-role': 'room', 'data-project': cat.id });
+  const room = roomOf(cat.id);
+  const paused = room.paused;
+  const nAgents = (cat.roster || []).length;
 
   /* 1 — header. */
   const head = h('div.p-h');
   head.append(h('div.p-h-top',
-    h('span.p-title', 'Room'),
+    h('span.p-title', cat.name + ' · room'),
     h('span.st', { 'data-s': paused ? 'failed' : 'running' },
       h('span.dot', { class: paused ? '' : 'dot-ring' }),
       paused ? 'relay paused' : 'relay live'),
     h('span.spacer'),
     h('button.btn', {
-      title: paused ? 'Resume agent-to-agent hand-offs'
-                    : 'Stop relaying agent pings. Your own messages still send.',
-      onclick: () => roomPause(!paused),
+      title: paused ? 'Resume agent-to-agent hand-offs in this project'
+                    : 'Stop relaying agent pings here. Your own messages still send.',
+      onclick: () => roomPause(cat.id, !paused),
     }, paused ? 'resume relay' : 'pause relay'),
-    ROOM.messages.length ? h('button.btn', {
+    room.messages.length ? h('button.btn', {
       'data-danger': '1',
-      title: 'Empty the shared transcript. The agents’ own sessions are untouched.',
-      onclick: () => roomClear(),
+      title: 'Empty this project’s transcript. The clones’ own sessions are untouched.',
+      onclick: () => roomClear(cat.id),
     }, 'clear') : null));
 
   head.append(h('div.p-head',
-    'One transcript, ' + (ROOM.agents.length || 9) + ' agents. Unpinged goes to main; '
-    + 'a ping goes to that lane and main does not see it. Everything said lands here.'));
+    'One transcript for ' + cat.name + ', ' + nAgents + ' agents. Unpinged goes to this '
+    + 'project’s main; a ping goes to that clone and main does not see it. Everything said '
+    + 'lands here. Agents in ' + cat.name + ' can only reach each other — there is no '
+    + 'cross-project messaging.'));
 
   /* The relay budget, on screen rather than in a log. A chain of agents handing
      work to each other is money being spent with no human in the loop, so both
-     bounds are visible before they bite and named when they do. */
+     bounds are visible before they bite and named when they do. Counted PER
+     PROJECT: a runaway chain here does not pause work somewhere else. */
   head.append(h('div.p-op.room-budget',
     h('b', 'relay'),
-    h('span.p-op-d', ROOM.relaysInWindow + ' of ' + ROOM.maxRelays + ' in the last '
+    h('span.p-op-d', room.relaysInWindow + ' of ' + ROOM.maxRelays + ' in the last '
       + ROOM.relayWindowMin + ' min'),
     h('span.p-op-t', '· ceiling ' + ROOM.maxHops + ' hops')));
   pane.append(head);
 
   if (paused) {
     pane.append(h('div.notice', { 'data-k': 'warn', 'data-enter': 'room-paused' }, h('span.dot'),
-      'Relay is paused' + (ROOM.pauseReason ? ' (' + ROOM.pauseReason + ')' : '')
+      'Relay is paused' + (room.pauseReason ? ' (' + room.pauseReason + ')' : '')
       + '. Messages you send still go out; an agent pinging a teammate does not hand over.'));
   }
   if (S.notice && S.notice.agentId === null) {
@@ -1309,17 +1337,18 @@ function RoomView() {
 
   /* 2 — the transcript. Same class, same floor, same assertion as an agent pane. */
   const tx = h('div.tx', { id: 'tx-main', 'data-agent': '__room__' });
-  if (!ROOM.messages.length) {
+  if (!room.messages.length) {
     tx.append(h('div.empty', { 'data-enter': 'room-empty' },
-      h('div', 'Nothing has been said in the room yet.'),
-      h('div.mc-foot', 'A message with no ping goes to main. Pick a lane below to hand it '
-        + 'straight to that agent instead — and they can hand it on from there.')));
+      h('div', 'Nothing has been said in ' + cat.name + ' yet.'),
+      h('div.mc-foot', 'A message with no ping goes to this project’s main. Pick a lane below '
+        + 'to hand it straight to that agent instead — and they can hand it on from there, '
+        + 'inside this project.')));
   }
-  for (const m of ROOM.messages) tx.append(RoomMsg(m));
+  for (const m of room.messages) tx.append(RoomMsg(m));
   pane.append(tx);
 
   /* 3 — the composer. */
-  pane.append(RoomFoot());
+  pane.append(RoomFoot(cat));
   return pane;
 }
 
@@ -1345,35 +1374,37 @@ function RoomMsg(m) {
   return box;
 }
 
-function RoomFoot() {
+function RoomFoot(cat) {
   const box = h('div.foot');
+  const room = roomOf(cat.id);
   const target = S.roomPing;
-  const live = agentById('agent:' + (target || 'main') + ':bridge');
+  const wantKey = 'agent:' + (target || 'main') + ':bridge:' + cat.id;
+  const live = cat.agents.find((a) => a.sessionKey === wantKey && !a.parent);
   const running = !!(live && live.status === 'running');
   const readOnly = typeof LIVE !== 'undefined' && LIVE.readOnly;
 
   /* 1 — header. */
-  box.append(h('div.foot-h', 'Message the room',
+  box.append(h('div.foot-h', 'Message ' + cat.name,
     h('span.spacer'),
     h('em', readOnly ? 'read-only connection — a send will be refused'
       : running ? (target ? agentLabel(target) : 'Thuban') + ' is mid-turn — this will queue'
       : 'no active turn — this starts one')));
 
   /* 2 — the ping bar. THE SAME CONTROL as the strip in the topbar. */
-  box.append(h('div.ping-wrap', h('div.ping', h('span.ping-l', 'ping'), AgentStrip('ping'))));
+  box.append(h('div.ping-wrap', h('div.ping', h('span.ping-l', 'ping'), AgentStrip('ping', cat))));
 
   /* 3 — the input. */
   const ta = h('textarea.ta', {
     id: 'cmd-main', rows: 1, value: S.roomDraft || '',
-    placeholder: 'Message the room — hold space to talk…',
+    placeholder: 'Message ' + cat.name + ' — hold space to talk…',
     oninput: (ev) => { S.roomDraft = ev.target.value; if (voiceAck('__room__')) renderAll(); },
-    onkeydown: (ev) => onRoomKey(ev),
+    onkeydown: (ev) => onRoomKey(ev, cat),
     onkeyup: (ev) => { if (ev.key === ' ') voiceStop(); },
     onblur: () => { if (VOICE.requestId) voiceStop(); },
   });
   box.append(h('div.compose-box', { 'data-cmd': '0', 'data-off': '0' },
     ta,
-    h('button.send', { onclick: () => roomSend() }, running ? 'queue' : 'send')));
+    h('button.send', { onclick: () => roomSend(cat.id) }, running ? 'queue' : 'send')));
 
   const v = VoiceState('__room__');
   if (v) box.append(v);
@@ -1381,28 +1412,36 @@ function RoomFoot() {
   /* 4 — where this goes, stated before it goes there. */
   box.append(target
     ? h('div.note', { 'data-k': 'info' }, h('b', '→'),
-        'Pinged: this goes to ' + agentLabel(target) + ' alone. main does not see it. '
-        + 'It lands in agent:' + target + ':bridge, the persistent thread Bridge keeps for '
-        + 'that lane — not a new session.')
+        'Pinged: this goes to ' + agentLabel(target) + ' in ' + cat.name + ' alone. main does '
+        + 'not see it. It lands in agent:' + target + ':bridge:' + cat.id + ', the persistent '
+        + 'thread Bridge keeps for that clone — not a new session, and not the same session as '
+        + agentLabel(target) + ' in any other project.')
     : h('div.note', { 'data-k': 'info' }, h('b', '→'),
-        'No ping: this goes to main (Thuban) and to nobody else. He sees every unpinged '
-        + 'message, and can hand it on by pinging a lane in his reply.'));
+        'No ping: this goes to ' + cat.name + '’s main (Thuban) and to nobody else. He sees '
+        + 'every unpinged message in this project, and can hand it on by pinging a lane in '
+        + 'his reply.'));
 
   const w = WriteState({ id: '__room__' });
   if (w) box.append(w);
 
-  /* 5 — metadata. What the room costs and where it is kept. */
+  /* 5 — metadata. What the room costs, where it is kept, and where its agents
+     remember things — the memory paths are the only place a reader can find out
+     that a clone has a private file AND a shared one. */
   const pair = (label, value) => h('span', null, h('b', label), h('i', value));
   box.append(h('div.p-use',
-    pair('messages', fmtNum(ROOM.messages.length)),
-    pair('agents', String(ROOM.agents.length || 0)),
-    pair('relay', ROOM.paused ? 'paused' : ROOM.relaysInWindow + '/' + ROOM.maxRelays),
+    pair('messages', fmtNum(room.messages.length)),
+    pair('agents', String((cat.roster || []).length)),
+    pair('relay', room.paused ? 'paused' : room.relaysInWindow + '/' + ROOM.maxRelays),
     pair('hop ceiling', String(ROOM.maxHops)),
     pair('voice', (LIVE.voice && LIVE.voice.route) === 'local'
       ? 'local · ' + (LIVE.voice.model || 'whisper')
       : 'gateway host (no local whisper)')));
   box.append(h('div.p-use-2',
-    h('span', null, h('b', 'threads '), 'agent:<id>:bridge, one per agent, persistent'),
+    h('span', null, h('b', 'threads '), 'agent:<id>:bridge:' + cat.id + ', one per agent in this '
+      + 'project, persistent and separate from every other project'),
+    h('span', null, h('b', 'memory '), (ROOM.memoryRoot || '~/.openclaw/workspace/memory/bridge')
+      + '/' + cat.id + '/<agent>.md private per clone · '
+      + (ROOM.sharedMemory || '~/.openclaw/workspace/memory/bridge/SHARED.md') + ' shared by all'),
     h('span', null, h('b', 'routing '), 'Bridge relays as an operator client — agentToAgent stays off')));
   return box;
 }
@@ -1411,9 +1450,9 @@ function RoomFoot() {
    The arming rule lives here because this is where the composer's value is:
    space starts a recording ONLY when the box is empty, so typing spaces still
    types spaces. Everything else is Swift's. */
-function onRoomKey(ev) {
+function onRoomKey(ev, cat) {
   if (voiceArmed(ev, S.roomDraft)) { ev.preventDefault(); voiceStart('__room__'); return; }
-  if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); roomSend(); }
+  if (ev.key === 'Enter' && !ev.shiftKey) { ev.preventDefault(); roomSend(cat && cat.id); }
 }
 
 /* The recording indicator. It has to be unmistakable — an open microphone you
@@ -1458,7 +1497,15 @@ function VoiceState(targetId) {
         : 'granting microphone access'));
 }
 
-function openRoom() { S.view = 'room'; S.customize = null; renderAll(); }
+/* Open a project's room — its first tab. Replaces `openRoom`, which went to a
+   global room that no longer exists. */
+function openProjectRoom(catId) {
+  S.view = 'sessions';
+  S.catId = catId;
+  S.tab[catId] = catId + '::room';
+  S.sub = null;
+  renderAll();
+}
 
 /* ───────────────────────── the inbox ─────────────────────────
 
@@ -1757,21 +1804,39 @@ function SettingsView() {
       + 'audits. Raising the set made a NEW pairing request rather than widening the old '
       + 'approval, which is why this connection reconnected unscoped until it was approved.')));
 
-  /* ── the room ── */
-  box.append(SetSection('The room',
-    'How the shared main chat is routed, and what it is bounded by.',
+  /* ── projects and their rooms ── */
+  const projects = typeof PREFS !== 'undefined' ? PREFS.projects : [];
+  const clones = projects.reduce((n, p) => n + ((p.roster || []).length), 0);
+  const pausedIn = projects.filter((p) => roomOf(p.id).paused).map((p) => p.name);
+  box.append(SetSection('Projects and rooms',
+    'A project is the unit of isolation. Each holds a full set of agent clones and one room.',
     h('div.set-rows',
-      SetRow('threads', 'agent:<id>:bridge — one persistent session per agent'),
-      SetRow('agents in the room', String((typeof ROOM !== 'undefined' && ROOM.agents.length) || 0)),
-      SetRow('relay', (typeof ROOM !== 'undefined' && ROOM.paused) ? 'paused' : 'live'),
+      SetRow('projects', projects.length ? projects.map((p) => p.name).join(', ') : 'none yet'),
+      SetRow('clones', clones + ' across ' + projects.length
+        + (projects.length === 1 ? ' project' : ' projects')),
+      SetRow('threads', 'agent:<id>:bridge:<projectId> — one persistent session per clone'),
+      SetRow('relay', pausedIn.length ? 'paused in ' + pausedIn.join(', ') : 'live'),
       SetRow('hop ceiling', String((typeof ROOM !== 'undefined' && ROOM.maxHops) || 6)),
       SetRow('rate limit', ((typeof ROOM !== 'undefined' && ROOM.maxRelays) || 0)
-        + ' relays per ' + ((typeof ROOM !== 'undefined' && ROOM.relayWindowMin) || 5) + ' minutes'),
-      SetRow('store', '~/Library/Application Support/Bridge/room.json')),
+        + ' relays per ' + ((typeof ROOM !== 'undefined' && ROOM.relayWindowMin) || 5)
+        + ' minutes, counted per project'),
+      SetRow('private memory', (ROOM.memoryRoot || '~/.openclaw/workspace/memory/bridge')
+        + '/<projectId>/<agent>.md'),
+      SetRow('shared memory', ROOM.sharedMemory || '~/.openclaw/workspace/memory/bridge/SHARED.md'),
+      SetRow('store', '~/Library/Application Support/Bridge/{prefs,room}.json')),
     h('p.set-note', 'BRIDGE does the routing; the agents do not. A message with no ping goes to '
-      + 'main alone; a pinged one goes to that lane and main does not see it; an agent that writes '
-      + '@lane in its reply hands the work over and Bridge delivers it. Every turn lands in the one '
-      + 'shared transcript regardless of who it was addressed to.'),
+      + 'that project’s main alone; a pinged one goes to that clone and main does not see it; an '
+      + 'agent that writes @lane in its reply hands the work over and Bridge delivers it. Every '
+      + 'turn lands in that project’s transcript regardless of who it was addressed to.'),
+    h('p.set-note', h('b', 'Isolation, and the one hole in it that is deliberate: '),
+      'an agent can only reach agents inside its own project — a ping naming a lane in another '
+      + 'project matches nothing and is not delivered. The exception is the shared memory file, '
+      + 'which every clone in every project reads and appends to, so a lane working here knows '
+      + 'the other projects exist. That is a choice, not an oversight.'),
+    h('p.set-note', h('b', 'Projects are yours to make. '),
+      'Nothing arriving from the gateway can create one: the sidebar is built from this '
+      + 'preference document alone, the create path refuses to run unless a click on this '
+      + 'window called it, and every write is normalised before it lands on disk.'),
     h('p.set-note', h('b', 'What this deliberately does not do: '),
       'it does not enable tools.agentToAgent or tools.sessions.visibility. Those would grant every '
       + 'lane on this host cross-transcript read access to every other session, permanently, to buy '
@@ -1820,7 +1885,7 @@ function SettingsView() {
     h('div.set-rows',
       SetRow('store', LIVE.prefsPath || '~/Library/Application Support/Bridge/prefs.json'),
       SetRow('projects', String(PREFS.projects.length)),
-      SetRow('tool tabs', String(PREFS.toolTabs.length)),
+      SetRow('document version', String(PREFS.version)),
       SetRow('inbox read marks', String(PREFS.inboxRead.length))),
     h('p.set-note', 'A JSON document, not UserDefaults: the shape is nested, the file is '
       + 'inspectable with cat, and it can be copied or deleted without arguing with cfprefsd\'s '
@@ -1842,84 +1907,51 @@ const SetSection = (title, lede, ...kids) =>
   h('section.set-s', h('h3', title), lede ? h('p.set-lede', lede) : null, ...kids);
 const SetRow = (k, v) => h('div.set-row', h('b', k), h('i', v));
 
-/* ───────────────────────── customize: the roster picker ─────────────────────────
-   Per project (and per tool tab), which agents get a top tab. The list is the
-   gateway's real agents.list, so it cannot go stale against a gateway that grew
-   a lane. */
+/* THE ROSTER PICKER IS GONE, and its absence is the feature.
 
-function CustomizePanel(c) {
-  const roster = c.roster || [];
-  const box = h('div.cust', { 'data-enter': 'cust:' + c.id });
-  box.append(h('div.cust-h', 'Agents shown as tabs in ', h('b', c.name),
-    h('span.spacer'),
-    h('button.btn', { onclick: () => { S.customize = null; renderAll(); } }, 'done')));
+   It let you choose which agents got a tab in a project. A project now holds a
+   FULL set of agent clones by definition — that is what makes it the unit of
+   isolation — so a control for deselecting some of them was a control for
+   making the invariant false. Agents join a project by existing on the gateway
+   (`reconcileRosters` in live.js), and nothing in the UI can take one out.
 
-  if (!LIVE.agents.length) {
-    box.append(h('div.strip-none', 'The gateway has not answered agents.list yet.'));
-    return box;
-  }
+   The panel's one genuinely useful piece of prose — why Bridge will not create
+   an AGENT, which needs operator.admin and a gateway restart — has moved to the
+   empty-project pane below, where it is still read. */
 
-  box.append(h('div.cust-grid', LIVE.agents.map((ag) => {
-    const on = roster.includes(ag.id);
-    const live = allAgents().some((a) => a.lane === ag.id && !a._placeholder);
-    return h('button.cust-a', {
-      'data-on': on ? '1' : '0',
-      title: ag.workspace || ag.id,
-      onclick: () => toggleRoster(c, ag.id),
-    },
-      h('span.cust-m', on ? '✓' : '+'),
-      h('span.cust-n', ag.name),
-      h('span.cust-i', ag.id),
-      h('span.cust-l', { 'data-live': live ? '1' : '0' }, live ? 'has sessions' : 'no session'));
-  })));
-
-  /* Creating an agent is a different kind of act from picking one, and the
-     control says so instead of being absent. Disabled with the reason on it —
-     a disabled control with no explanation is just a broken one. */
-  box.append(h('div.cust-new',
-    h('button.cust-a', { disabled: true, 'data-new': '1' },
-      h('span.cust-m', '+'), h('span.cust-n', 'New agent…'),
-      h('span.cust-i', 'disabled')),
-    h('p.cust-why', h('b', 'Why this is off: '),
-      'creating an agent writes the gateway\'s own configuration on the Linux host — a new '
-      + 'agents entry, a workspace, an agent directory — and the gateway must be restarted to '
-      + 'pick it up. That is Chancellor\'s call and a config change, not a click in a monitor. '
-      + 'Bridge would also need operator.admin, which it deliberately does not request. '
-      + 'Picking from the nine agents that already exist is what this panel does.')));
-
-  box.append(h('p.cust-foot', roster.length
-    ? roster.length + ' of ' + LIVE.agents.length + ' agents rostered. Tabs follow this order; '
-      + 'a rostered agent with no session here still gets a tab that says so.'
-    : 'No roster set, so every session in ' + c.name + ' gets a tab — which is the default.'));
-  return box;
-}
-
-function toggleRoster(c, agentId) {
-  const roster = [...(c.roster || [])];
-  const i = roster.indexOf(agentId);
-  if (i >= 0) roster.splice(i, 1); else roster.push(agentId);
-  prefUpsert(c.id, c.name, { roster });
-  buildCategories();
-  renderAll();
-}
-
-function commitAdd(kind) {
+/* CREATING A PROJECT CLONES THE AGENT SET INTO IT — `projectCreate` does that
+   part, in live.js, and it throws unless the intent token is set. Both callers
+   of this function are wrapped in `fromUser`; nothing else calls it. */
+function commitAdd() {
   const name = (S.newName || '').trim();
   if (!name) { S.adding = null; renderAll(); return; }
-  const id = (kind === 'tool' ? 'tool-' : 'p-') + slug(name) + '-' + (Date.now() % 100000);
-  const rec = { id, name, roster: [], note: '' };
-  if (kind === 'tool') PREFS.toolTabs.push(rec); else PREFS.projects.push(rec);
-  savePrefs();
+  const id = projectCreate(name);
   S.adding = null; S.newName = '';
+  if (!id) { renderAll(); return; }
   buildCategories();
   S.view = 'sessions';
   S.catId = id;
-  S.customize = id;      // straight into the roster picker: a new empty project
-  renderAll();           // with no way to fill it is a dead end
+  S.tab[id] = id + '::room';   // land in the new project's room, which is where
+  renderAll();                 // you say the first thing to it
 }
 
-function openInbox() { S.view = 'inbox'; S.customize = null; renderAll(); }
-function openSettings() { S.view = 'settings'; S.customize = null; renderAll(); }
+/* Removing a project takes its rooms with it — Room.setProjects drops the
+   transcripts on the native side, and the next `room` push rebuilds the page's
+   map without them. Selection falls forward to whatever is left. */
+function removeProject(id) {
+  if (!projectRemove(id)) { S.removing = null; renderAll(); return; }
+  S.removing = null;
+  delete S.tab[id];
+  buildCategories();
+  if (S.catId === id) {
+    S.catId = (CATEGORIES[0] && CATEGORIES[0].id) || null;
+    S.sub = null;
+  }
+  renderAll();
+}
+
+function openInbox() { S.view = 'inbox'; S.removing = null; renderAll(); }
+function openSettings() { S.view = 'settings'; S.removing = null; renderAll(); }
 
 /* ───────────────────────── render ───────────────────────── */
 
@@ -1929,13 +1961,10 @@ function renderAll() {
   // Inbox and Settings are views, not categories: neither is a place sessions
   // live, and giving them a fake category would put them in the navigator's
   // section lists and into agentById's search.
-  if (S.view === 'room') {
-    // The room is a full pane with a transcript and a composer, so it goes
-    // through the same shell as the sessions view and gets the same geometry —
-    // including the .tx floor that four separate builds have broken.
-    return renderShellView('Room', 'The shared main chat — Bridge relays it',
-      h('div.work', h('div.panes', RoomView())), keep, AgentStrip('nav'));
-  }
+  //
+  // THERE IS NO 'room' VIEW. The room is a project's first tab and renders
+  // through the ordinary sessions path below, which is what makes it genuinely
+  // tab zero rather than a separate destination that merely looks like one.
   if (S.view === 'inbox') {
     return renderShellView('Inbox', 'Completions and questions', InboxView(), keep);
   }
@@ -1944,7 +1973,12 @@ function renderAll() {
   }
 
   const c = category();
-  if (!c) return renderWaiting();
+  // Two different nothings, drawn differently. No projects is a state he fixes
+  // by naming one; no snapshot yet is a state he waits out.
+  if (!c) {
+    return (typeof PREFS !== 'undefined' && PREFS.loaded && !PREFS.projects.length)
+      ? renderNoProjects(keep) : renderWaiting();
+  }
   // BRIDGE: S.catId starts null and category() falls forward to the first live
   // one. Write that back, or the hash this render syncs says "#/null/…".
   if (S.catId !== c.id) S.catId = c.id;
@@ -1958,11 +1992,8 @@ function renderAll() {
   Nav();
   SidebarFoot();
 
-  // Phase A had two kinds and a ternary. Phase B has three — project, tool,
-  // agent — and the ternary quietly filed Education under "Agents".
-  const kind = CRUMB_KIND[c.kind] || 'Projects';
   const crumb = document.getElementById('crumb');
-  if (crumb) crumb.textContent = 'Bridge / ' + kind + ' / ' + c.name;
+  if (crumb) crumb.textContent = 'Bridge / ' + CRUMB_KIND + ' / ' + c.name;
   const title = document.getElementById('title');
   if (title) title.textContent = c.name;
   // BRIDGE: a gateway session group has no repo or branch. v4 always printed
@@ -1973,19 +2004,22 @@ function renderAll() {
   mount('mc-sub', sub2);
 
   PageTabs(c);
-  mount('topbar-actions', TopbarActions(c));
+  mount('topbar-actions', TopbarActions());
   mount('alarm', Alarm());
 
-  const panes = h('div.panes', Pane(a, 'main', c));
+  // TAB ZERO IS THE ROOM. `a.kind === 'room'` is the only branch, and it swaps
+  // the PANE alone: the strip, the split pane and the .tx floor are the ordinary
+  // ones, which is the point. The room is not a special screen, it is this
+  // project's first tab.
+  //
+  // The strip renders for the room too, and that is not cosmetic. A subagent
+  // spawned by this project's `main` clone is parented to the room tab, so
+  // skipping the strip here would leave those runs in the category with no way
+  // on screen to reach them — visible in `agentById`, unreachable by clicking.
+  const panes = h('div.panes', a.kind === 'room' ? RoomView(c) : Pane(a, 'main', c));
   if (sub) panes.append(Pane(sub, 'sub', c));
 
-  // data-cust is the roster picker's open state, published to CSS. The picker
-  // and the composer are in different subtrees and cannot see each other any
-  // other way, and the composer has to give up its prose while the picker is on
-  // screen or there is not room for both. See `.work[data-cust="1"]`.
-  mount('content', h('div.work', { 'data-cust': S.customize === c.id ? '1' : '0' },
-    S.customize === c.id ? CustomizePanel(c) : null,
-    Strip(c, a), panes));
+  mount('content', h('div.work', { 'data-cust': '0' }, Strip(c, a), panes));
   markEntrances();
   syncHash();
   restoreUi(keep);
@@ -2018,34 +2052,61 @@ function renderEmptyCategory(c, keep) {
   SidebarFoot();
   if (S.catId !== c.id) S.catId = c.id;
   const crumb = document.getElementById('crumb');
-  if (crumb) crumb.textContent = 'Bridge / ' + (c.kind === 'tool' ? 'Tools' : 'Projects') + ' / ' + c.name;
+  if (crumb) crumb.textContent = 'Bridge / ' + CRUMB_KIND + ' / ' + c.name;
   const t = document.getElementById('title');
   if (t) t.textContent = c.name;
   mount('mc-sub', h('span', c.subtitle));
   mount('page-tabs');
-  mount('topbar-actions', TopbarActions(c));
+  mount('topbar-actions', TopbarActions());
   mount('alarm', Alarm());
   mount('content', h('div.work',
-    S.customize === c.id ? CustomizePanel(c) : null,
     h('div.empty-cat', { 'data-enter': 'emptycat:' + c.id },
-      h('b', c.kind === 'tool' ? 'This tool tab has no agents yet.'
-                               : 'This project has no agents yet.'),
-      h('p', c.note || (c.kind === 'tool'
-        ? 'A tool tab groups agents around one kind of work. Nothing is built inside a tool '
-          + 'tab in this build — no chat surface, no rendering, no exercises — so what it holds '
-          + 'today is the tabs you choose and their real sessions.'
-        : 'Use Customize to pick which agents appear as its tabs. Bridge stores that choice '
-          + 'locally and it survives a relaunch.')),
-      c.local ? h('p.empty-cat-w', h('b', 'Note: '),
-        'this project exists in Bridge only. Filing a gateway session into a group means '
-        + 'setting that session\'s category, which needs operator.write — so a project made '
-        + 'here rosters agents but cannot yet move live sessions into itself.') : null,
-      h('button.btn', { 'data-go': '1',
-        onclick: () => { S.customize = c.id; renderAll(); } }, 'Customize agents'))));
+      h('b', 'This project has no agents.'),
+      h('p', 'A project is created with a full set of clones, so this state means the gateway '
+        + 'has not answered agents.list yet. It fills in on its own the moment it does.'),
+      h('p.empty-cat-w', h('b', 'Bridge does not create agents. '),
+        'Creating one writes the gateway\'s own configuration on the Linux host — an agents '
+        + 'entry, a workspace, an agent directory — and the gateway must be restarted to pick '
+        + 'it up. That is Chancellor\'s call and a config change, not a click in a monitor. '
+        + 'Bridge would also need operator.admin, which it deliberately does not request.'))));
   markEntrances();
   syncHash();
   if (keep) restoreUi(keep);
 }
+
+/* NO PROJECTS AT ALL. Distinct from "still connecting", and it must be: a fresh
+   install and a broken socket look identical if both draw the same spinner, and
+   only one of them is fixed by typing a name into the sidebar. */
+function renderNoProjects(keep) {
+  Nav();
+  SidebarFoot();
+  const crumb = document.getElementById('crumb');
+  if (crumb) crumb.textContent = 'Bridge / Projects';
+  const t = document.getElementById('title');
+  if (t) t.textContent = 'No projects yet';
+  mount('mc-sub', h('span', 'A project is the unit of isolation — it holds its own agents'));
+  mount('page-tabs');
+  mount('topbar-actions', TopbarActions());
+  mount('alarm', Alarm());
+  mount('content', h('div.work',
+    h('div.empty-cat', { 'data-enter': 'noprojects' },
+      h('b', 'Make a project to start.'),
+      h('p', 'A project holds a full set of agent clones and its own room. The same agent in '
+        + 'two projects is two separate sessions that share no state, so work in one cannot '
+        + 'leak into the other. Each clone keeps a private memory file per project, and every '
+        + 'clone everywhere also reads and appends to one shared file, so they know what the '
+        + 'other projects are doing.'),
+      h('p.empty-cat-w', h('b', 'You make projects. '),
+        'Agents cannot — not by convention but in code: nothing arriving from the gateway can '
+        + 'add one, and the create path refuses to run unless a click on this window is what '
+        + 'called it.'),
+      h('button.btn', { 'data-go': '1',
+        onclick: () => { S.adding = 'project'; S.newName = ''; renderAll(); } },
+        'New project'))));
+  markEntrances();
+  if (keep) restoreUi(keep);
+}
+
 
 /* BRIDGE: before the first snapshot lands there is nothing to draw. A blank
    window would be indistinguishable from a crashed one, so the wait — and any
@@ -2161,7 +2222,6 @@ function restoreUi(keep) {
    State is the source of truth; the hash is written to follow it. */
 
 function hashNow() {
-  if (S.view === 'room') return '#/room';
   if (S.view === 'inbox') return '#/inbox';
   if (S.view === 'settings') return '#/settings';
   return '#/' + S.catId + '/' + currentTabId() + (S.sub ? '/' + S.sub : '');
@@ -2174,7 +2234,6 @@ function syncHash() {
 function applyHash() {
   if (typeof location === 'undefined') return;
   const [, catId, tabId, subId] = String(location.hash || '').split('/');
-  if (catId === 'room') { if (S.view !== 'room') openRoom(); return; }
   if (catId === 'inbox') { if (S.view !== 'inbox') openInbox(); return; }
   if (catId === 'settings') { if (S.view !== 'settings') openSettings(); return; }
   if (!catId || !catById(catId)) return;
@@ -2190,7 +2249,6 @@ function selectCat(id) {
   S.catId = id;
   S.sub = null;
   S.view = 'sessions';
-  S.customize = null;
   renderAll();
 }
 function selectTab(id) {
@@ -2214,7 +2272,10 @@ function jumpTo(catId, agentId) {
 /* A lane named in the main transcript is a link to that lane's tab. */
 function jumpToLane(lane) {
   const c = category();
-  const a = tabAgents(c).find((x) => x.agentId === lane);
+  if (!c) return;
+  // Matched on `.lane` — the AGENT id — because that is what a transcript names.
+  // `.agentId` is a session-derived handle and never equals "frontend-design".
+  const a = tabAgents(c).find((x) => x.lane === lane);
   if (a) selectTab(a.id);
 }
 
