@@ -400,18 +400,24 @@ final class Gateway {
             DispatchQueue.main.async {
                 Room.shared.setAgents(roster)
                 Room.shared.push()
+                // The set of clone sessions is the projects crossed with their
+                // rosters, and only Room can compute it — so it hands the keys
+                // back rather than Gateway deriving them from the agent list. A
+                // project created while the app is running comes through the
+                // same call, from BridgeApp's `prefs` case.
+                Gateway.shared.subscribeRoom(Room.shared.keys)
             }
-            self?.subscribeRoom(roster.map { $0.id })
         }
     }
 
     // MARK: - the room
     //
-    // Bridge owns a persistent session per agent, `agent:<id>:bridge`, and is
-    // the only thing that writes to them. Subscribing and backfilling here is
-    // what makes an agent's reply visible to the room at all: Room.observe reads
-    // each backfill, takes any turn above its high-water mark into the shared
-    // transcript, and relays the pings it finds. See Room.swift.
+    // Bridge owns a persistent session per CLONE — `agent:<id>:bridge:<project>`
+    // — and is the only thing that writes to them. Subscribing and backfilling
+    // here is what makes an agent's reply visible to its project's room at all:
+    // Room.observe reads each backfill, takes any turn above its high-water mark
+    // into that project's transcript, and relays the pings it finds inside that
+    // project. See Room.swift.
 
     private var roomKeys: Set<String> = []
 
@@ -436,9 +442,16 @@ final class Gateway {
     private var roomSubscribeCount = 0
     var roomSubscribesIssued: Int { q.sync { roomSubscribeCount } }
 
-    private func subscribeRoom(_ agentIds: [String]) {
-        for id in agentIds {
-            let key = Room.key(id)
+    /// Takes fully-formed clone session keys rather than agent ids: which
+    /// sessions exist is a function of the PROJECTS, which live in Prefs, and
+    /// Gateway has no business knowing that shape. Idempotent, so calling it
+    /// again after a project is created subscribes only the keys that are new.
+    func subscribeRoom(_ keys: [String]) {
+        q.async { [weak self] in self?.subscribeRoomLocked(keys) }
+    }
+
+    private func subscribeRoomLocked(_ keys: [String]) {
+        for key in keys {
             guard !roomKeys.contains(key) else { continue }
             roomKeys.insert(key)
             roomSubscribeCount += 1
@@ -616,7 +629,7 @@ final class Gateway {
             // messages go over: trimMessage clips content for display, and a
             // relayed hand-off must be the agent's actual words rather than the
             // first 4000 characters of them.
-            if Room.agentId(fromRoomKey: key) != nil {
+            if Room.route(fromRoomKey: key) != nil {
                 let raw = payload["messages"] as? [[String: Any]] ?? []
                 DispatchQueue.main.async { Room.shared.observe(key: key, messages: raw) }
             }
