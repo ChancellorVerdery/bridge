@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Deliberately NOT sandboxed. Bridge's transport is an ssh child process
+	     that reads the user's own ~/.ssh/config; App Sandbox forbids both. The
+	     alternative — exposing the Gateway on a non-loopback interface, or
+	     widening gateway.controlUi.allowedOrigins — is a real security
+	     regression, and this is not. -->
+	<key>com.apple.security.app-sandbox</key>
+	<false/>
+</dict>
+</plist>

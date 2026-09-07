@@ -1,0 +1,1639 @@
+/* ══ MISSION CONTROL, AUTHORED ════════════════════════════════════════════════
+
+   atlas.css above this file is Atlas's stylesheet, lifted unedited. This file is
+   everything Mission Control needs that Atlas does not ship: a transcript, a
+   steering queue, a subagent split, a failure alarm. It is written *on* Atlas's
+   tokens — there is not one raw hex value below, and no font family that is not
+   one of Atlas's three.
+
+   Colour semantics, carried from v3 and mapped onto Atlas's palette rather than
+   invented:
+
+     working now        --pos        the green. Solid, and it glows.
+     waiting on you     --brass      Atlas's accent. The one thing that wants you.
+     failed             --neg        loudest thing on screen, and it is at the top.
+     idle / clean       --ink-faint  no colour at all. Finished is not an event.
+     informational      --signal     links, relays, receipts. Never a run state,
+                                     so the teal can never be read as "working".
+
+   A stale run is drawn hollow rather than recoloured: brass already means "an
+   agent is waiting on you", and a run we have stopped hearing from is not
+   waiting on you. A hollow green ring reads as "claims to be running,
+   unverified", which is the exact claim being made.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ---- shell adjustments --------------------------------------------------- */
+
+/* Atlas's own full-bleed pattern, copied in form from its calendar plugin
+   (`html[data-page="calendar"] .content { padding: 0; overflow: hidden; display:
+   flex; }`). Bridge's transcripts scroll inside themselves; the page itself must
+   never scroll, or the composer walks off the bottom of the screen.
+
+   BRIDGE: the attribute is `bridge`, not `mission-control`. Renaming the page in
+   index.html without renaming it here is exactly the break the sentence above
+   describes, and it is not visible until a transcript is tall enough to overflow
+   — which the smoke test's geometry checks now force on every run. */
+html[data-page="bridge"] .content { padding: 0; overflow: hidden; display: flex; }
+
+/* One line between the title and the page-tabs, carrying what the crumb is too
+   short for: what the project is, where it lives, what branch it is on. */
+.mc-sub {
+  margin: 7px 0 0;
+  font-size: 12.5px;
+  color: var(--ink-dim);
+}
+.mc-sub code {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+}
+
+/* Connection health, shaped as an .action-btn so it sits in the topbar's rhythm,
+   but it is a readout and not a control — hence the cursor. */
+.mc-state { cursor: default; gap: 9px; white-space: nowrap; }
+.mc-state b { font-weight: 600; color: var(--ink); }
+.mc-state .dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ink-faint); }
+.mc-state[data-k="live"] { color: var(--ink-dim); }
+.mc-state[data-k="live"] .dot { background: var(--pos); box-shadow: 0 0 9px rgba(var(--pos-rgb), 0.75); }
+.mc-state[data-k="warn"] { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.45); background: rgba(var(--brass-rgb), 0.09); }
+.mc-state[data-k="warn"] b { color: var(--brass); }
+.mc-state[data-k="warn"] .dot { background: var(--brass); box-shadow: 0 0 9px rgba(var(--brass-rgb), 0.75); }
+.mc-state[data-k="fail"] { color: var(--neg); border-color: rgba(var(--neg-rgb), 0.5); background: rgba(var(--neg-rgb), 0.11); }
+.mc-state[data-k="fail"] b { color: var(--neg); }
+.mc-state[data-k="fail"] .dot { background: var(--neg); box-shadow: 0 0 10px rgba(var(--neg-rgb), 0.85); }
+
+/* Atlas's .nav__icon and .action-btn svg rules are descendant selectors, so the
+   svg keeps its Atlas sizing through this wrapper; the wrapper only has to stop
+   being the flex item that eats the sizing. */
+.mc-ico { display: flex; flex: none; }
+
+/* ---- navigator ----------------------------------------------------------- */
+
+/* Two sections — PROJECTS and TOOLS — where Atlas has one. Atlas puts its single
+   .nav__head in .sidebar__head; a second heading has to live inside .nav, so the
+   section wrapper is the only structural addition to the sidebar. */
+.nav__sec { display: flex; flex-direction: column; gap: 3px; }
+.nav__sec + .nav__sec { margin-top: 20px; }
+.nav__sec .nav__head { animation: rise 0.6s 0.12s both ease-out; }
+
+/* .nav__item is Atlas's, unchanged. It centres a single row of children; a
+   project needs a second line under its name, so the label and its status share
+   a column between the icon and the dot. */
+.nav__col { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+.nav__row { display: flex; align-items: center; gap: 8px; }
+.nav__sub {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav__sub em { font-style: normal; color: var(--pos); }
+.nav__sub i { font-style: normal; color: var(--brass); }
+.nav__item.is-active .nav__sub em { color: var(--pos); }
+/* Atlas's .plug-badge, recoloured to --neg. A project with a failed agent says so
+   in the navigator, whether or not you are looking at that project. */
+.nav__fail {
+  color: var(--neg);
+  border-color: rgba(var(--neg-rgb), 0.55);
+  background: rgba(var(--neg-rgb), 0.14);
+  margin-left: 0;
+  font-weight: 600;
+}
+
+/* Sidebar foot: what this prototype is, stated plainly, so nobody mistakes the
+   mock corpus for a live Gateway. */
+.mc-foot {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  line-height: 1.7;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 8px 12px 0;
+}
+
+/* ---- page-tabs: the agent selector --------------------------------------- */
+
+/* The pill itself is Atlas's .page-tab, untouched — same box, same radius, same
+   brass active state. Two things are added inside it: a status mark and a child
+   count. Selection stays brass and status stays in the dot, so the two never
+   compete for the same channel. */
+/* Atlas's tabs say "Board" and "Settings"; these say "Frontend Design", and
+   without nowrap every multi-word lane wrapped inside its own pill and the strip
+   doubled in height. flex-wrap on the container is the honest counterpart: eight
+   agents will not always fit on one line where two tabs always did. */
+/* AND THE STRIP IS BOUNDED, because `flex-wrap: wrap` on its own is not a
+   layout, it is an unpriced claim on the pane below it.
+
+   Measured against the live gateway at 1440x900 on a category holding SIXTEEN
+   sessions: the strip wrapped to four rows, `.content` came out at 592px
+   instead of 756, and the composer scrolled its own content — send button below
+   the fold — with the transcript already pinned at its 200px floor. Nothing in
+   the pane had changed. The header simply took 164px and the pane paid for it.
+
+   The comment above already saw the shape of this ("eight agents will not
+   always fit on one line") and answered it by letting the strip grow, which
+   makes the pane's height a function of how many sessions the gateway happens
+   to have open. That is not a property a transcript floor can survive.
+
+   Two rows, then it scrolls: 30px per pill plus the 6px row-gap. The tabs are
+   all still reachable, the strip's cost is now a constant, and `PageTabs`
+   scrolls the active one into view so the cap can never hide the tab you are
+   on. Below 68px there is no wrap at all, so a one-row strip is unaffected. */
+.page-tabs {
+  flex-wrap: wrap; row-gap: 6px; align-items: center;
+  max-height: 68px; overflow-y: auto; overscroll-behavior: contain;
+}
+.page-tabs::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.page-tab { gap: 7px; white-space: nowrap; }
+.page-tab .tick { color: var(--ink-faint); font-size: 11px; line-height: 1; }
+.page-tab.is-active .tick { color: var(--brass); }
+.tab-kids {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  padding: 0 5px;
+  border-radius: 99px;
+  border: 1px solid var(--line-2);
+  color: var(--ink-faint);
+  line-height: 1.2;
+}
+
+/* The status mark, shared by page-tabs, the roster and the subagent cards. */
+.tmark {
+  width: 7px; height: 7px; flex: none;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+.tmark[data-s="running"] { background: var(--pos); box-shadow: 0 0 8px rgba(var(--pos-rgb), 0.8); }
+.tmark[data-s="waiting"] { background: var(--brass); box-shadow: 0 0 8px rgba(var(--brass-rgb), 0.8); }
+.tmark[data-s="failed"]  { background: var(--neg);  box-shadow: 0 0 9px rgba(var(--neg-rgb), 0.9); }
+.tmark[data-s="queued"], .tmark[data-s="planned"] {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px var(--ink-faint);
+}
+/* Hollowed, not recoloured. See the note at the top of this file. */
+.tmark[data-stale="1"] {
+  background: transparent !important;
+  box-shadow: inset 0 0 0 1.5px var(--pos) !important;
+  animation: nt-fade 1.6s ease-in-out infinite;
+}
+@keyframes nt-fade { 50% { opacity: 0.42; } }
+.tick { color: var(--ink-faint); }
+
+/* ---- failure alarm ------------------------------------------------------- */
+
+/* Above the topbar, not inside the content: it outranks the page title, which is
+   the point. When nothing has failed it is not rendered at all and takes no
+   height, so its mere appearance is the signal. */
+.alarm {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  padding: 9px 40px;
+  border-bottom: 1px solid rgba(var(--neg-rgb), 0.32);
+  background: linear-gradient(180deg, rgba(var(--neg-rgb), 0.16), rgba(var(--neg-rgb), 0.07));
+  font-size: 12.5px;
+  overflow: hidden;
+  animation: rise 0.4s both ease-out;
+}
+.alarm > b {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--neg);
+  border: 1px solid rgba(var(--neg-rgb), 0.5);
+  border-radius: 999px;
+  padding: 3px 9px;
+  flex: none;
+}
+.alarm-item {
+  font: inherit;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.alarm-item i { font-style: normal; color: var(--ink-faint); }
+.alarm-item:hover { color: var(--neg); }
+.alarm-sep { color: rgba(var(--neg-rgb), 0.4); flex: none; }
+
+/* ---- work area ----------------------------------------------------------- */
+
+.work { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0;
+        position: relative; /* the roster picker overlays this box — see .cust */ }
+
+/* ---- roster / subagent strip --------------------------------------------- */
+
+.strip {
+  flex: none;
+  padding: 14px 40px 12px;
+  border-bottom: 1px solid var(--line);
+  animation: rise 0.5s 0.06s both ease-out;
+}
+.strip-h {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.strip-h em { font-style: normal; letter-spacing: 0.12em; opacity: 0.8; }
+.spacer { flex: 1; }
+.strip-none { font-size: 12.5px; color: var(--ink-faint); }
+
+/* Drawn as a table of lines rather than cards. In v3 the same roster as cards
+   measured 291px of a 963px viewport and left the transcript two lines; the
+   whole point of the roster is to be scanned, not read. */
+/* Two columns wherever there is room for them. As a single column this strip
+   measured 277px and left the transcript 210px of an 816px content area; the
+   roster is meant to be glanceable, not to be the page. */
+.rost { display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr)); column-gap: 22px; row-gap: 1px; }
+.rost-row {
+  display: grid;
+  grid-template-columns: 7px 148px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: none;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.rost-row:hover { background: rgba(var(--ink-rgb), 0.045); border-color: var(--line); }
+.rost-n { color: var(--ink); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rost-h { color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.rost-t { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); }
+.rost-row[data-s="failed"] .rost-h { color: var(--neg); }
+.rost-row[data-s="waiting"] .rost-h { color: var(--brass); }
+
+/* Subagent cards. These carry what Claude Code's subagent list withholds: the
+   live operation, not just the prompt and a token count. */
+.strip-row { display: flex; gap: 12px; flex-wrap: wrap; }
+.sub {
+  flex: 1 1 260px;
+  min-width: 0;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: linear-gradient(180deg, rgba(var(--ink-rgb), 0.035), rgba(var(--ink-rgb), 0.012));
+  color: var(--ink-dim);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.sub:hover { border-color: var(--line-2); background: rgba(var(--ink-rgb), 0.055); }
+.sub[aria-pressed="true"] {
+  border-color: rgba(var(--brass-rgb), 0.5);
+  background: rgba(var(--brass-rgb), 0.09);
+}
+.sub-top { display: flex; align-items: center; gap: 8px; }
+.sub-name { font-size: 13.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub-el, .sub-go { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-faint); flex: none; }
+.sub-head {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--ink-dim);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.sub-op {
+  display: flex;
+  gap: 7px;
+  align-items: baseline;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+  min-width: 0;
+}
+.sub-op b { color: var(--signal); font-weight: 500; flex: none; }
+.sub-op span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sub[data-s="failed"] .sub-op b { color: var(--neg); }
+.sub[data-s="waiting"] .sub-op b { color: var(--brass); }
+
+/* ---- panes --------------------------------------------------------------- */
+
+.panes { display: flex; flex: 1; min-height: 0; }
+.pane {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.pane + .pane { border-left: 1px solid var(--line-2); background: rgba(var(--ink-rgb), 0.014); }
+
+.p-h { flex: none; padding: 13px 28px 11px; border-bottom: 1px solid var(--line); }
+.p-h-top { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
+.p-title { font-family: "Instrument Serif", serif; font-size: 25px; line-height: 1; color: var(--ink); }
+.p-head {
+  font-size: 13.5px; line-height: 1.5; color: var(--ink-dim);
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+
+/* The subagent pane's way back to its parent. */
+.crumb-back {
+  display: flex; align-items: center; gap: 6px; margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-faint);
+  background: none; border: 0; padding: 0; cursor: pointer;
+}
+.crumb-back:hover { color: var(--brass); }
+
+.st {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase;
+  padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--line-2); color: var(--ink-faint);
+}
+.st .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.st .dot-ring { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.st .dot-hollow { background: transparent; box-shadow: inset 0 0 0 1.5px currentColor; }
+.st[data-s="running"] { color: var(--pos); border-color: rgba(var(--pos-rgb), 0.45); background: rgba(var(--pos-rgb), 0.1); }
+.st[data-s="waiting"] { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.5); background: rgba(var(--brass-rgb), 0.1); }
+.st[data-s="failed"]  { color: var(--neg); border-color: rgba(var(--neg-rgb), 0.5); background: rgba(var(--neg-rgb), 0.11); }
+.st .tick { color: inherit; }
+
+.btn {
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  font-size: 11.5px; font-weight: 600;
+  padding: 5px 12px; border-radius: 9px;
+  border: 1px solid var(--line-2);
+  background: rgba(var(--ink-rgb), 0.03);
+  color: var(--ink-dim);
+  cursor: pointer; flex: none;
+  transition: 0.15s;
+}
+.btn:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.07); }
+.btn[data-danger] { color: var(--neg); border-color: rgba(var(--neg-rgb), 0.45); background: rgba(var(--neg-rgb), 0.1); }
+.btn[data-danger]:hover { background: rgba(var(--neg-rgb), 0.2); }
+
+/* What it is doing right now, in one line. */
+.p-op {
+  display: flex; gap: 8px; align-items: baseline; margin-top: 9px;
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-dim);
+  min-width: 0;
+}
+.p-op b { color: var(--signal); font-weight: 500; flex: none; }
+.p-op-d { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--ink-dim); }
+.p-op-t { color: var(--ink-faint); flex: none; }
+.p-op-idle { color: var(--ink-faint); }
+
+.err-box {
+  flex: none; margin: 12px 28px 0; padding: 11px 14px;
+  border: 1px solid rgba(var(--neg-rgb), 0.45);
+  border-left-width: 3px;
+  border-radius: 11px;
+  background: rgba(var(--neg-rgb), 0.1);
+  color: var(--neg);
+  font-size: 13px; line-height: 1.5;
+}
+.err-box code { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; opacity: 0.8; }
+
+.notice {
+  display: flex; align-items: flex-start; gap: 9px; flex: none;
+  margin: 12px 28px 0; padding: 9px 13px;
+  border: 1px solid var(--line-2); border-radius: 11px;
+  background: rgba(var(--ink-rgb), 0.04);
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-dim);
+  animation: fade 0.2s both ease-out;
+}
+.notice .dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 5px; flex: none; background: var(--ink-faint); }
+.notice code { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-faint); }
+.notice[data-k="ok"]   { border-color: rgba(var(--pos-rgb), 0.4); background: rgba(var(--pos-rgb), 0.08); }
+.notice[data-k="ok"] .dot { background: var(--pos); }
+.notice[data-k="warn"] { border-color: rgba(var(--brass-rgb), 0.45); background: rgba(var(--brass-rgb), 0.08); color: var(--ink); }
+.notice[data-k="warn"] .dot { background: var(--brass); }
+.notice[data-k="fail"] { border-color: rgba(var(--neg-rgb), 0.5); background: rgba(var(--neg-rgb), 0.1); color: var(--ink); }
+.notice[data-k="fail"] .dot { background: var(--neg); }
+
+/* The amber state, made actionable. An agent that stopped to ask you something
+   and only shows a colour is a differently-painted "running". */
+.ask {
+  flex: none; margin: 10px 28px 0; padding: 11px 15px;
+  border: 1px solid rgba(var(--brass-rgb), 0.45);
+  border-radius: 13px;
+  background: linear-gradient(180deg, rgba(var(--brass-rgb), 0.12), rgba(var(--brass-rgb), 0.045));
+  animation: pop 0.2s both ease-out;
+}
+.ask-k {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 7px;
+  font-family: "IBM Plex Mono", monospace; font-size: 9.5px;
+  letter-spacing: 0.24em; text-transform: uppercase; color: var(--brass);
+}
+.ask-k span { letter-spacing: 0.12em; color: var(--ink-faint); }
+.ask-t { font-size: 13.5px; line-height: 1.55; color: var(--ink); }
+.ask-row { display: flex; gap: 9px; flex-wrap: wrap; margin-top: 10px; }
+.ask-btn {
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  font-size: 12.5px; font-weight: 600;
+  padding: 7px 15px; border-radius: 10px;
+  border: 1px solid rgba(var(--brass-rgb), 0.55);
+  background: rgba(var(--brass-rgb), 0.16);
+  color: var(--brass);
+  cursor: pointer; transition: 0.15s;
+}
+.ask-btn:hover { background: rgba(var(--brass-rgb), 0.3); color: var(--ink); }
+
+/* ---- transcript ---------------------------------------------------------- */
+
+/* THE TRANSCRIPT FLOOR, STRUCTURALLY.
+   This pane has now collapsed three separate times — 104px, 36px, and a
+   2364px overflow — and each fix was to whatever had just grown above or below
+   it. The cause is one line: .foot was `flex: none`, so the composer took
+   whatever height it wanted and the transcript, as the only flexible child,
+   paid for all of it. Phase B adds two more things that can grow inside the
+   composer (the ping strip, and the gateway's answer to a write), and the
+   refusal banner promptly squeezed the transcript to 94px.
+   
+   So the floor is now a floor rather than a habit. .tx cannot go below 200px,
+   and .foot can shrink and scroll instead of pushing. Whichever of them is
+   over budget, the transcript keeps a readable minimum and the composer stays
+   inside the window — the two properties the smoke test asserts. */
+.tx {
+  /* `1 1 0`, not `1 1 auto`, and that is the whole fix. With basis `auto` the
+     transcript's flex-basis is its CONTENT height — thousands of pixels on a
+     real run — so when the pane overflowed, the shrink algorithm handed almost
+     all of the shrinkage to .tx and none to the composer, and the transcript
+     collapsed. With basis 0 the transcript grows into whatever is left instead
+     of competing for it, and min-height is then a floor the algorithm has to
+     respect: the composer shrinks only once the transcript is at 200px. */
+  flex: 1 1 0; min-height: 200px; overflow-y: auto;
+  padding: 16px 28px 20px;
+  display: flex; flex-direction: column; gap: 13px;
+  scrollbar-width: none;
+}
+.tx::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.tx { -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 15px); mask-image: linear-gradient(180deg, transparent 0, #000 15px); }
+.tx > .empty {
+  min-height: 0; height: auto; padding: 26px;
+  font-size: 13px; color: var(--ink-faint);
+  border: 1px dashed var(--line-2); border-radius: 13px;
+  align-items: center; animation: none; background: none;
+}
+
+/* Marks are U+25CF / U+25B8 / U+21B3 / U+203A, not the U+23FA and U+23BF Claude
+   Code uses. Those two render as tofu boxes in a bare Linux font set — which the
+   first v3 screenshot pass showed plainly, and which no DOM assertion would ever
+   have caught. */
+.e-user, .e-asst, .e-relay, .e-tool { display: grid; grid-template-columns: 16px 1fr; gap: 10px; align-items: start; }
+.e-mark {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px; line-height: 1.7; color: var(--ink-faint); text-align: center;
+}
+.e-text { font-size: 13.5px; line-height: 1.65; white-space: pre-wrap; color: var(--ink-dim); }
+.e-user .e-mark { color: var(--brass); }
+.e-user .e-text {
+  color: var(--ink);
+  border-left: 2px solid rgba(var(--brass-rgb), 0.45);
+  padding-left: 12px;
+  margin-left: -2px;
+}
+.e-asst .e-mark { color: var(--signal); }
+.e-asst .e-text { color: var(--ink-dim); }
+.e-relay .e-mark { color: var(--signal); }
+.e-relay-l button {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--signal); background: none; border: 0; padding: 0 0 4px; cursor: pointer;
+}
+.e-relay-l button:hover { color: var(--brass); text-decoration: underline; }
+.e-sys {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: 0.1em; color: var(--ink-faint);
+  padding-left: 26px;
+}
+.e-time { opacity: 0.7; }
+.e-err {
+  font-size: 13px; line-height: 1.55; color: var(--neg);
+  padding: 9px 13px; border-radius: 10px;
+  border: 1px solid rgba(var(--neg-rgb), 0.4);
+  background: rgba(var(--neg-rgb), 0.09);
+}
+.e-tool .e-mark { color: var(--ink-faint); }
+.e-tool[data-s="err"] .e-mark { color: var(--neg); }
+.tool-call { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink); }
+.tool-call b { color: var(--signal); font-weight: 500; }
+.tool-args { color: var(--ink-faint); }
+.tool-res { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); margin-top: 2px; }
+
+/* Diffs, shell output and tailing logs. */
+.blk {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.22);
+}
+.blk-h {
+  display: flex; align-items: center; gap: 9px;
+  padding: 7px 13px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(var(--ink-rgb), 0.03);
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  letter-spacing: 0.08em; color: var(--ink-faint);
+}
+.blk-h b { color: var(--ink-dim); font-weight: 500; }
+.blk-h .add { color: var(--pos); }
+.blk-h .del { color: var(--neg); }
+.blk-b { padding: 9px 13px; overflow-x: auto; }
+.blk-b pre {
+  margin: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px; line-height: 1.65;
+  color: var(--ink-dim);
+  white-space: pre;
+}
+.dl { display: block; }
+.dl[data-t="h"] { color: var(--signal); opacity: 0.85; }
+.dl[data-t="+"] { color: var(--pos); background: rgba(var(--pos-rgb), 0.08); }
+.dl[data-t="-"] { color: var(--neg); background: rgba(var(--neg-rgb), 0.08); }
+.sh-cmd { display: block; color: var(--brass); }
+.sh-out { display: block; color: var(--ink-dim); }
+.log-b { max-height: 190px; overflow-y: auto; scrollbar-width: none; }
+.log-b::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.log-l { display: block; }
+.log-l[data-bad="1"] { color: var(--neg); }
+.log-cursor {
+  display: inline-block; width: 7px; height: 13px;
+  background: var(--pos); vertical-align: -2px;
+  animation: nt-fade 1.1s steps(1) infinite;
+}
+
+/* ---- planned agents (Education) ------------------------------------------ */
+
+/* The real agent view with the transcript replaced by written scope. Fabricating
+   a tutoring session here would make the screenshot better and the prototype
+   worse: it would be the one pane in this file lying about its state. */
+.plan { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 28px 22px; scrollbar-width: none; }
+.plan::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.plan-lede { font-size: 13.5px; line-height: 1.65; color: var(--ink-dim); max-width: 76ch; }
+.plan-cols { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 18px; }
+.plan-col {
+  flex: 1 1 300px; min-width: 0;
+  padding: 15px 17px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(var(--ink-rgb), 0.03), rgba(var(--ink-rgb), 0.01));
+}
+.plan-col h4 {
+  margin: 0 0 11px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px; font-weight: 500;
+  letter-spacing: 0.24em; text-transform: uppercase;
+}
+.plan-col[data-k="yes"] h4 { color: var(--signal); }
+.plan-col[data-k="no"]  h4 { color: var(--ink-faint); }
+.plan-col ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 9px; }
+/* One child per li, never two. `li::before` is itself a grid item, so an extra
+   spacer span pushed the text into the 14px marker column and every entry
+   rendered one word per line. That bug is why this rule is a grid at all. */
+.plan-col li {
+  display: grid; grid-template-columns: 14px 1fr; align-items: baseline;
+  font-size: 13px; line-height: 1.55; color: var(--ink-dim);
+}
+.plan-col li::before { content: "▸"; color: var(--ink-faint); font-size: 10px; }
+.plan-col[data-k="no"] li::before { content: "×"; }
+.plan-col[data-k="no"] li { color: var(--ink-faint); }
+
+/* ---- the steering panel -------------------------------------------------- */
+
+/* Top to bottom, and the order is the specification:
+     1  header          — what this box steers
+     2  queued messages — what you have already said that has not landed
+     3  commands        — what "/" can do here
+     4  the input       — where you type
+     5  metadata        — elapsed · context · tokens · cost · model · tools & edits
+   The metadata strip is under the input on purpose. It is the receipt for what
+   the box above it has cost, not a badge on a header. */
+.foot {
+  /* CAPPED, not shrinkable — and the difference matters, because the first
+     attempt at this got it wrong in an instructive way.
+     
+     Making .foot `flex: 0 1 auto` did fix the transcript (94px -> 482px), but it
+     fixed it by letting the flex algorithm shrink the composer in EVERY case:
+     .tx's flex-basis is its content height, which on a long transcript is
+     thousands of pixels, so it absorbed almost none of the shrinkage and the
+     composer was squeezed to 184px of its natural ~380px. That hides the send
+     button behind an inner scrollbar during ordinary use. Trading a clipped
+     transcript for a clipped composer is not a fix.
+     
+     A percentage max-height was the second wrong answer: it never resolved,
+     because this element's containing block is itself flex-sized, so the cap
+     silently did nothing and the transcript sat at 120px.
+     
+     The pair that works is `flex: 0 1 auto` here against `flex: 1 1 0` on .tx.
+     The composer keeps its natural height for as long as the transcript can
+     still make its 200px floor — the ordinary case is untouched, and the send
+     button is never hidden. Only a composer tall enough to push the transcript
+     under that floor is shrunk, and it scrolls rather than clipping. */
+  flex: 0 1 auto; min-height: 0; overflow-y: auto;
+  padding: 11px 28px 12px;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(var(--ink-rgb), 0.02), rgba(var(--ink-rgb), 0.045));
+}
+.foot-h {
+  display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--ink-dim);
+}
+.foot-h em { font-style: normal; letter-spacing: 0.11em; color: var(--ink-faint); }
+
+/* 2 — the queue. Ordered by what is still owed, not by clock: still-queued
+   outranks already-dropped, which outranks already-picked-up (that one is
+   visible in the transcript above). Capped at three, with the remainder
+   summarised — an uncapped list with a max-height sliced the fourth item
+   through the middle of its own text, which reads as broken rather than as
+   scrolled, and ate the transcript it exists to annotate. */
+.queue { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; }
+.qi {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--ink-faint);
+  border-radius: 10px;
+  background: rgba(var(--ink-rgb), 0.03);
+}
+.qi-t { font-size: 12.5px; line-height: 1.45; color: var(--ink); }
+.qi-m { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); margin-top: 3px; line-height: 1.5; }
+.qi-s {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+  padding: 3px 8px; border-radius: 999px; flex: none; margin-left: auto;
+  border: 1px solid var(--line-2); color: var(--ink-faint);
+}
+.qi[data-s="queued"] { border-left-color: var(--brass); }
+.qi[data-s="queued"] .qi-s { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.5); background: rgba(var(--brass-rgb), 0.1); }
+.qi[data-s="picked_up"], .qi[data-s="delivered"] { border-left-color: var(--pos); }
+.qi[data-s="picked_up"] .qi-s, .qi[data-s="delivered"] .qi-s { color: var(--pos); border-color: rgba(var(--pos-rgb), 0.45); background: rgba(var(--pos-rgb), 0.09); }
+.qi[data-s="interrupted"], .qi[data-s="cancelled"] { border-left-color: var(--neg); }
+.qi[data-s="interrupted"] .qi-t, .qi[data-s="cancelled"] .qi-t { color: var(--ink-dim); text-decoration: line-through; text-decoration-color: rgba(var(--neg-rgb), 0.6); }
+.qi[data-s="interrupted"] .qi-s, .qi[data-s="cancelled"] .qi-s { color: var(--neg); border-color: rgba(var(--neg-rgb), 0.5); background: rgba(var(--neg-rgb), 0.1); }
+.q-more { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); margin: -4px 0 10px; }
+
+/* 3 — commands. Always present as a row of chips so the slot Chancellor
+   specified is never empty; typing "/" expands it into the described palette. */
+.cmds {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 9px;
+  flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none;
+}
+.cmds::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.cmds-l, .cmd-chip { flex: none; }
+.cmds-l {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase;
+  color: var(--ink-faint); margin-right: 2px;
+}
+.cmd-chip {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  padding: 3px 9px; border-radius: 999px;
+  border: 1px solid var(--line-2); background: rgba(var(--ink-rgb), 0.03);
+  color: var(--ink-faint); cursor: pointer; transition: 0.15s;
+}
+.cmd-chip:hover { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.5); background: rgba(var(--brass-rgb), 0.1); }
+.cmd-chip[disabled] { opacity: 0.4; cursor: default; }
+.cmd-chip[disabled]:hover { color: var(--ink-faint); border-color: var(--line-2); background: rgba(var(--ink-rgb), 0.03); }
+
+/* Same 22px + 9px the chip row occupies, so opening the palette moves nothing. */
+.pal-slot { position: relative; height: 22px; margin-bottom: 9px; }
+.pal {
+  position: absolute; left: 0; right: 0; bottom: -2px; z-index: 20;
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 5px;
+  border: 1px solid var(--line-2); border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 -18px 44px -16px rgba(0, 0, 0, 0.8);
+  animation: pop 0.14s both ease-out;
+}
+.pal-i {
+  display: grid; grid-template-columns: 190px 1fr; gap: 12px; align-items: baseline;
+  padding: 6px 10px; border-radius: 9px;
+  border: 0; background: none; cursor: pointer; text-align: left;
+  font-family: "Hanken Grotesk", system-ui, sans-serif; font-size: 12.5px;
+  color: var(--ink-dim);
+}
+.pal-i b { font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 500; color: var(--ink); }
+.pal-i:hover, .pal-i[data-hi="1"] { background: rgba(var(--brass-rgb), 0.11); }
+.pal-i[data-hi="1"] b { color: var(--brass); }
+.pal-none { padding: 8px 10px; font-size: 12.5px; color: var(--ink-faint); }
+
+/* 4 — the input. .pw-field is Atlas's; the wrapper is the send button's frame. */
+.compose-box {
+  display: flex; align-items: flex-end; gap: 9px;
+  padding: 7px 7px 7px 12px;
+  border: 1px solid var(--line-2); border-radius: 13px;
+  background: rgba(var(--ink-rgb), 0.035);
+  transition: border-color 0.15s;
+}
+.compose-box:focus-within { border-color: rgba(var(--brass-rgb), 0.55); }
+.compose-box[data-cmd="1"] { border-color: rgba(var(--signal-rgb), 0.5); }
+.compose-box[data-off="1"] { opacity: 0.55; }
+.ta {
+  flex: 1; min-width: 0;
+  border: 0; background: none; outline: none; resize: none;
+  padding: 6px 0;
+  min-height: 34px; max-height: 132px;
+  field-sizing: content;
+  color: var(--ink);
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  font-size: 13.5px; line-height: 1.5;
+}
+.ta::placeholder { color: var(--ink-faint); }
+.compose-box[data-cmd="1"] .ta { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; }
+.send {
+  flex: none;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px; font-weight: 500; letter-spacing: 0.22em; text-transform: uppercase;
+  padding: 9px 16px; border-radius: 10px;
+  border: 1px solid rgba(var(--brass-rgb), 0.5);
+  background: rgba(var(--brass-rgb), 0.14);
+  color: var(--brass);
+  cursor: pointer; transition: 0.15s;
+}
+.send:hover { background: rgba(var(--brass-rgb), 0.28); color: var(--ink); }
+.send[data-off="1"] { border-color: var(--line-2); background: none; color: var(--ink-faint); cursor: default; }
+
+.note {
+  display: flex; gap: 9px; align-items: flex-start;
+  margin-top: 9px;
+  font-size: 12px; line-height: 1.55; color: var(--ink-faint);
+}
+.note b { color: var(--ink-faint); flex: none; font-weight: 500; }
+.note[data-k="info"] { color: var(--ink-faint); }
+.note[data-k="info"] b { color: var(--signal); }
+.note[data-k="warn"] { color: var(--brass); }
+.note[data-k="warn"] b { color: var(--brass); }
+
+/* 5 — the metadata strip, under the input. Label in IBM Plex Mono the way Atlas
+   sets every label; value in --ink. Labelled pairs, not prose: he asked for
+   "tokens 214,300", never "it has used 214,300 tokens". */
+.p-use {
+  display: flex; flex-wrap: wrap; align-items: baseline;
+  gap: 6px 0;
+  margin-top: 9px; padding-top: 9px;
+  border-top: 1px solid var(--line);
+}
+.p-use > span { display: inline-flex; align-items: baseline; gap: 6px; }
+.p-use > span:not(:last-child)::after {
+  content: "·";
+  color: var(--ink-faint);
+  opacity: 0.55;
+  margin: 0 9px;
+}
+.p-use b {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px; font-weight: 500;
+  letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.p-use i {
+  font-style: normal;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11.5px;
+  color: var(--ink);
+}
+.p-use .mc-sess { color: var(--ink-faint); }
+.p-use-2 {
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 22px;
+  margin-top: 6px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px; color: var(--ink-faint);
+}
+.p-use-2 b { font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase; font-size: 9px; }
+
+/* THE SIXTH COLLAPSE — and the first one a machine found rather than an eye.
+   .foot's own comment above accepts a scrolling composer as its escape valve:
+   "Only a composer tall enough to push the transcript under that floor is
+   shrunk, and it scrolls rather than clipping." The floor guard added in the
+   pass-3 note calls that exact state a FAILED layout, because a composer that
+   scrolls its own content has put the send button behind an inner scrollbar.
+   Both rules were in the tree at once. Neither had ever been run at a window
+   short enough to make them disagree — every measurement for eleven passes was
+   taken at 1000px or 1600x1000.
+
+   At 1180x760, an ordinary laptop window, three views disagree:
+     sessions  foot=213  natural=262   tx=200
+     ping      foot=271  natural=276   tx=200
+     voice     foot=282  natural=308   tx=200
+   The transcript is pinned on its 200px floor in all three, so the composer is
+   the only compressible box left and absorbs the entire debt — 49px, 5px, 26px.
+
+   WHAT IS ACTUALLY BELOW THE FOLD, said accurately. The floor guard prints
+   "the send button is below the fold", and at these heights that is an
+   overstatement: the rows above SEND total ~142px and the composer still gets
+   185–325, so the input and the button are on screen and what scrolls away is
+   the metadata. The layout is still the state §11.9 defines as crushed, and it
+   is one row of growth from eating the button for real — but the fix is
+   justified by the debt, not by a claim about the button that is not true here.
+
+   THE THRESHOLD IS MEASURED, NOT GUESSED. Swept at 1200, 1000, 900, 860, 800
+   and 760 on this machine: foot==natural at 1200 and 1000, and the debt opens
+   at 900 (325 of 354). So the shed arms below 940 — above the first height that
+   is actually short, and clear of the 1000px window every prior pass measured,
+   which is therefore unchanged by this rule.
+
+   940 TURNED OUT TO ALREADY BE THIS FILE'S SHORT-WINDOW BREAKPOINT — the
+   topbar block further down uses the same number for the same reason. That was
+   found after the sweep rather than before it, which is the good direction: a
+   measured threshold landing on the existing convention confirms the
+   convention. The query is repeated here rather than merged into that block so
+   each rule sits with the styles it overrides; if that trade is wrong, merging
+   them is mechanical.
+
+   WHAT THIS DOES NOT FIX. Shedding prose buys 54px — the composer's natural
+   height drops from 354 to 300 — which closes the debt at 900 and not at 760,
+   where it is 115px. What remains is 300px of controls, and 200 + 300 + the
+   pane header does not fit in 760. Below 900 the transcript floor and the
+   composer cannot both be satisfied and one of them has to yield. Which one is
+   a product decision and is left open deliberately.
+
+   The escape valve is kept, but it stops being "hide the send button". The
+   composer sheds PROSE, exactly as it does for the roster picker and by the
+   same rule: the metadata strips and the explanatory notes go, and the header,
+   the ping bubbles, the slash chips, the voice indicator, the input and SEND
+   all stay. A `warn` note is not prose — it is a report about the message
+   about to be sent (the queue warning), so it is explicitly exempt and stays
+   on screen at every height. */
+@media (max-height: 940px) {
+  .foot .p-use,
+  .foot .p-use-2,
+  .foot .note:not([data-k="warn"]) { display: none; }
+}
+
+/* A split pane is 620px, not 1300. Narrower gutters there are not a smaller
+   design — they are the same design at half the width, and the 16px they return
+   is 16px the transcript keeps. */
+body[data-split="1"] .p-h,
+body[data-split="1"] .tx,
+body[data-split="1"] .foot,
+body[data-split="1"] .plan { padding-left: 20px; padding-right: 20px; }
+body[data-split="1"] .ask,
+body[data-split="1"] .err-box,
+body[data-split="1"] .notice { margin-left: 20px; margin-right: 20px; }
+body[data-split="1"] .p-h { padding-top: 11px; padding-bottom: 9px; }
+body[data-split="1"] .foot { padding-top: 10px; padding-bottom: 11px; }
+body[data-split="1"] .p-use > span:not(:last-child)::after { margin: 0 7px; }
+
+/* ---- prototype controls -------------------------------------------------- */
+
+.topbar__actions { position: relative; }
+.sim-pop {
+  position: absolute; top: calc(100% + 10px); right: 0; z-index: 40;
+  width: 286px;
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 6px;
+  border: 1px solid var(--line-2); border-radius: 14px;
+  background: var(--panel);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.7);
+  animation: pop 0.16s both ease-out;
+}
+.sim-pop-h {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: var(--ink-faint); padding: 7px 10px 8px;
+}
+.sim-pop button {
+  font-family: "Hanken Grotesk", system-ui, sans-serif; font-size: 12.5px;
+  text-align: left; padding: 8px 10px; border-radius: 9px;
+  border: 0; background: none; color: var(--ink-dim); cursor: pointer;
+}
+.sim-pop button:hover { background: rgba(var(--brass-rgb), 0.11); color: var(--ink); }
+.sim-pop hr { border: 0; border-top: 1px solid var(--line); margin: 5px 8px; }
+
+/* ---- narrow ------------------------------------------------------------- */
+
+/* Below 1180 a split pane would give each side ~380px, which is not a transcript.
+   The subagent takes the whole work area instead and keeps its breadcrumb back. */
+/* Atlas's topbar is deliberately tall — 32px of air, a 42px serif title. On a
+   900px-tall laptop that generosity is taken straight out of the transcript, so
+   below 940px the same topbar is drawn at a smaller scale rather than at a
+   different design. Same rule Atlas applies to itself on mobile. */
+@media (max-height: 940px) {
+  .topbar { padding: 20px 40px 14px; }
+  .title { font-size: 33px; }
+  .crumb { margin-bottom: 5px; }
+  .mc-sub { margin-top: 5px; font-size: 12px; }
+  .strip { padding-top: 11px; padding-bottom: 10px; }
+  .rost-row { padding-top: 5px; padding-bottom: 5px; }
+  .p-h { padding-top: 11px; padding-bottom: 9px; }
+  .alarm { padding-top: 7px; padding-bottom: 7px; }
+  /* The steering panel is the tallest thing on a short screen, so it is where the
+     pixels come from: one line per queued message (the full text stays in the
+     hover title), and every gap inside the panel tightened by a few px. */
+  .qi-t, .qi-m { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qi { padding: 6px 11px; }
+  .queue { gap: 5px; margin-bottom: 8px; }
+  .cmds { margin-bottom: 7px; }
+  .pal-slot { margin-bottom: 7px; }
+  .note { margin-top: 7px; }
+  .p-use { margin-top: 7px; padding-top: 7px; }
+  .p-use-2 { margin-top: 5px; }
+  .foot { padding-top: 9px; padding-bottom: 10px; }
+  .ask { margin-top: 9px; padding: 10px 14px; }
+  .ask-row { margin-top: 8px; }
+  .ask-btn { padding: 6px 13px; }
+  .tx { padding-top: 13px; padding-bottom: 14px; }
+  .foot-h { margin-bottom: 8px; }
+  .strip-h { margin-bottom: 8px; }
+  .sub { padding: 10px 12px; gap: 5px; }
+  .sub-head { -webkit-line-clamp: 1; }
+  .sub-op { padding-top: 6px; }
+  .compose-box { padding: 5px 5px 5px 11px; }
+  .ta { min-height: 30px; padding: 5px 0; }
+  .q-more { margin: -3px 0 8px; }
+}
+
+@media (max-width: 1180px) {
+  body[data-split="1"] .pane[data-role="main"] { display: none; }
+  .topbar { padding: 22px 24px 16px; }
+  .title { font-size: 34px; }
+  .strip, .alarm { padding-left: 24px; padding-right: 24px; }
+  .p-h, .tx, .foot, .plan { padding-left: 20px; padding-right: 20px; }
+  .rost-row { grid-template-columns: 7px 130px 1fr auto; }
+}
+
+/* The sidebar keeps Atlas's 248px until there is genuinely no room for it. At
+   208px "5 RUNNING · 2 WAITING" ellipsised to "5 RUNNING · 2 …", which drops the
+   one word on that line worth reading, and the brand wrapped onto two lines. */
+@media (max-width: 1024px) {
+  .app { grid-template-columns: 208px 1fr; }
+  .brand__name { font-size: 22px; }
+  .nav__sub { letter-spacing: 0.02em; font-size: 9px; }
+  .nav__item { gap: 9px; padding-left: 10px; padding-right: 10px; }
+  .mc-foot { letter-spacing: 0.06em; }
+}
+
+/* ══ BRIDGE ═══════════════════════════════════════════════════════════════
+   Everything below this line is Bridge's, not Mission Control v4's. Two
+   things: the wordmark, and the one-shot gate on entrance animations. */
+
+/* ---- the wordmark --------------------------------------------------------
+   Atlas signs its sidebar with a badge — a rounded-square mark with a blue
+   glow. Bridge is family, not a sibling wearing the same crest, so it signs
+   with type instead: Atlas's own display face (Instrument Serif, already in
+   .brand__name), and the brass that the shell spends on "this is the live
+   thing" — the same accent as .nav__item.is-active::before. No image, so
+   there is no logo file to keep in sync and nothing to load. */
+
+.brand { padding: 2px 8px 22px; }
+.brand__text { display: flex; flex-direction: column; gap: 7px; }
+.brand__name { font-size: 31px; letter-spacing: 0.2px; color: var(--ink); }
+.brand__rule {
+  width: 26px; height: 2px; border-radius: 2px;
+  background: linear-gradient(90deg, var(--brass), rgba(var(--brass-rgb), 0.1));
+  box-shadow: 0 0 12px -2px rgba(var(--brass-rgb), 0.55);
+}
+
+/* ---- connection, in the sidebar foot ------------------------------------- */
+
+.mc-foot[data-conn="live"] { color: var(--ink-dim); }
+.mc-foot[data-conn="reconnecting"], .mc-foot[data-conn="connecting"] { color: var(--brass); }
+.mc-foot[data-conn="stale"], .mc-foot[data-conn="error"] { color: var(--neg); }
+
+/* ---- entrance animations play once --------------------------------------
+   renderAll() remounts whole subtrees on every state change — a tool event, a
+   token count, the one-second clock — so an entrance declared on a plain
+   selector replayed on every tick. That is the looping after page load.
+
+   The animations are not deleted. Each declaration above (and the ones lifted
+   verbatim from Atlas, which must not be edited: atlas.css is byte-checked by
+   `node mkatlas.js --check`) keeps its duration, delay, fill and easing; only
+   the NAME is switched off here and switched back on by `.is-enter`, which
+   app.js adds to an element whose key was absent from the previous render.
+
+   Not listed, deliberately: `.tmark[data-stale]` and `.log-cursor`. Those two
+   are `animation: … infinite` because they are live indicators — a run that has
+   gone quiet, a log still tailing — and they are supposed to keep going. */
+
+.brand,
+.nav__head,
+.nav__sec .nav__head,
+.topbar,
+.empty,
+.alarm,
+.strip,
+.notice,
+.ask,
+.pal              { animation-name: none; }
+
+.brand.is-enter,
+.nav__head.is-enter,
+.nav__sec .nav__head.is-enter,
+.topbar.is-enter,
+.empty.is-enter,
+.alarm.is-enter,
+.strip.is-enter   { animation-name: rise; }
+
+.notice.is-enter  { animation-name: fade; }
+.ask.is-enter,
+.pal.is-enter     { animation-name: pop; }
+
+/* .brand and .topbar are static markup — they are never remounted, so they
+   never replayed. They are gated anyway and given their entrance once from
+   app.js's first pass, so the rule "an entrance is a .is-enter" has no
+   exceptions to remember. */
+
+/* ══ BRIDGE — PHASE B ══════════════════════════════════════════════════════
+
+   Inbox, projects, roster picker, ping bubbles, tool tabs, settings, and the
+   gateway's answer to a write. Same rules as everything above this line: Atlas
+   tokens only — no raw hex, no fourth font — and every colour that carries
+   meaning reuses a meaning already established. Brass is "wants you"; the
+   inbox's unread mark and the ping selection are both that. --neg is refusal.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── navigator additions ─────────────────────────────────────────────────── */
+
+/* The unread count rides the sidebar item itself. .plug-badge is Atlas's and is
+   already positioned by the nav rules; this only gives it the brass that the
+   rest of this app uses for "this is waiting on you". */
+.nav__unread {
+  background: rgba(var(--brass-rgb), 0.16);
+  border: 1px solid rgba(var(--brass-rgb), 0.45);
+  color: var(--brass);
+}
+
+.nav__add {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; margin-top: 2px; padding: 6px 10px;
+  border: 1px dashed var(--line-2); border-radius: 9px;
+  background: none; color: var(--ink-faint);
+  font-family: inherit; font-size: 12px; text-align: left; cursor: pointer;
+  transition: 0.15s;
+}
+.nav__add:hover { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.4); }
+.nav__add span { font-size: 14px; line-height: 1; }
+
+.add-row { display: flex; gap: 5px; margin-top: 2px; }
+.add-in {
+  flex: 1; min-width: 0; padding: 6px 9px;
+  border: 1px solid rgba(var(--brass-rgb), 0.45); border-radius: 9px;
+  background: rgba(var(--ink-rgb), 0.05);
+  color: var(--ink); font-family: inherit; font-size: 12px;
+}
+.add-in:focus { outline: none; border-color: var(--brass); }
+.add-go, .add-x {
+  padding: 5px 9px; border: 1px solid var(--line-2); border-radius: 9px;
+  background: rgba(var(--ink-rgb), 0.03); color: var(--ink-dim);
+  font-family: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+}
+.add-go:hover { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.45); }
+
+.foot-set {
+  display: flex; align-items: center; gap: 9px;
+  width: 100%; margin-bottom: 9px; padding: 6px 10px;
+  border: 1px solid transparent; border-radius: 9px;
+  background: none; color: var(--ink-dim);
+  font-family: inherit; font-size: 12.5px; text-align: left; cursor: pointer;
+  transition: 0.15s;
+}
+.foot-set:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.05); }
+.foot-set.is-active { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.4); background: rgba(var(--brass-rgb), 0.08); }
+.foot-set .mc-ico { display: inline-flex; width: 17px; height: 17px; }
+.foot-set .mc-ico svg { width: 17px; height: 17px; }
+
+/* ── the inbox ────────────────────────────────────────────────────────────── */
+
+.inbox { display: flex; flex-direction: column; gap: 4px; padding: 4px 28px 26px; overflow-y: auto; }
+.inbox-h {
+  display: flex; align-items: center; gap: 12px;
+  padding: 4px 0 10px; border-bottom: 1px solid var(--line);
+  font-size: 13px; color: var(--ink-dim);
+}
+.inbox-h b { color: var(--brass); font-weight: 600; }
+.inbox-h em { font-style: normal; font-size: 12px; color: var(--ink-faint); }
+.inbox-k {
+  margin: 20px 0 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px; letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.inbox-list { display: flex; flex-direction: column; gap: 5px; }
+
+/* One entry. Read entries recede; unread ones keep full ink and carry the brass
+   mark — the same "this wants you" signal the sidebar badge uses, so the count
+   and the rows it counts are visibly the same claim. */
+.ibx {
+  display: flex; flex-direction: column; gap: 5px;
+  width: 100%; padding: 10px 13px;
+  border: 1px solid var(--line); border-left: 2px solid var(--ink-faint);
+  border-radius: 11px;
+  background: rgba(var(--ink-rgb), 0.03);
+  color: var(--ink-dim); font: inherit; font-size: 13px;
+  text-align: left; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.ibx:hover { background: rgba(var(--ink-rgb), 0.06); border-color: var(--line-2); }
+.ibx[data-read="0"] { border-left-color: var(--brass); background: rgba(var(--brass-rgb), 0.05); }
+.ibx[data-s="failed"] { border-left-color: var(--neg); }
+.ibx[data-s="waiting"] { border-left-color: var(--brass); }
+.ibx-top { display: flex; align-items: center; gap: 9px; }
+.ibx-new { width: 6px; height: 6px; border-radius: 50%; background: var(--brass); flex: none; }
+.ibx-t { color: var(--ink); font-weight: 500; }
+.ibx[data-read="1"] .ibx-t { color: var(--ink-dim); font-weight: 400; }
+.ibx-lane {
+  font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  color: var(--ink-faint); white-space: nowrap;
+}
+.ibx-at { font-size: 11px; color: var(--ink-faint); white-space: nowrap; }
+.ibx-s { font-size: 12.5px; line-height: 1.5; color: var(--ink-dim); }
+.ibx-s-none { color: var(--ink-faint); font-style: italic; }
+.ibx-m {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  letter-spacing: 0.06em; color: var(--ink-faint);
+}
+.ibx-go { color: var(--brass); }
+
+/* The empty questions state. It is a paragraph and not a shrug because the
+   reason is the information: this is a measured finding about scopes and about
+   a missing sender, and it tells you what would have to change. */
+.inbox-why {
+  padding: 14px 16px;
+  border: 1px solid var(--line-2); border-left: 2px solid var(--brass);
+  border-radius: 11px;
+  background: rgba(var(--brass-rgb), 0.05);
+  font-size: 12.5px; line-height: 1.6; color: var(--ink-dim);
+}
+.inbox-why b { color: var(--brass); font-weight: 600; }
+.inbox-why p { margin: 9px 0 0; }
+.inbox-why-f { color: var(--ink-faint); }
+.inbox-foot {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--line);
+  font-size: 11.5px; line-height: 1.5; color: var(--ink-faint);
+}
+.inbox-foot b { color: var(--ink-dim); font-weight: 600; }
+
+/* ── settings ─────────────────────────────────────────────────────────────── */
+
+.set { display: flex; flex-direction: column; gap: 26px; padding: 6px 28px 30px; max-width: 860px; overflow-y: auto; }
+.set-s { display: flex; flex-direction: column; gap: 9px; }
+.set-s h3 {
+  margin: 0; font-family: "Instrument Serif", serif;
+  font-size: 19px; font-weight: 400; color: var(--ink);
+}
+.set-lede { margin: -4px 0 0; font-size: 12.5px; color: var(--ink-faint); }
+.set-rows { display: flex; flex-direction: column; gap: 1px; }
+.set-row { display: grid; grid-template-columns: 168px 1fr; gap: 14px; padding: 5px 0; border-bottom: 1px solid var(--line); }
+.set-row b {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--ink-faint); font-weight: 400; align-self: center;
+}
+.set-row i { font-style: normal; font-size: 12.5px; color: var(--ink-dim); word-break: break-all; }
+.set-field { display: flex; align-items: center; gap: 9px; margin-top: 4px; }
+.set-field label {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px;
+  letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint);
+}
+.set-in {
+  width: 230px; padding: 7px 11px;
+  border: 1px solid var(--line-2); border-radius: 9px;
+  background: rgba(var(--ink-rgb), 0.05);
+  color: var(--ink); font-family: "IBM Plex Mono", monospace; font-size: 12px;
+}
+.set-in:focus { outline: none; border-color: rgba(var(--brass-rgb), 0.55); }
+.set-note { margin: 2px 0 0; font-size: 12px; line-height: 1.6; color: var(--ink-faint); }
+.btn[data-go="1"] { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.45); background: rgba(var(--brass-rgb), 0.08); }
+
+.set-stub {
+  padding: 13px 15px;
+  border: 1px dashed var(--line-2); border-radius: 11px;
+  font-size: 12.5px; line-height: 1.6; color: var(--ink-faint);
+}
+.set-stub b { color: var(--ink-dim); }
+.set-stub p { margin: 8px 0 0; }
+
+.scopes { display: flex; flex-direction: column; gap: 1px; margin-top: 3px; }
+.scope {
+  display: grid; grid-template-columns: 16px 168px 1fr 92px;
+  align-items: center; gap: 11px;
+  padding: 6px 10px; border: 1px solid transparent; border-radius: 9px;
+  font-size: 12.5px; color: var(--ink-faint);
+}
+.scope[data-has="1"] { background: rgba(var(--pos-rgb), 0.06); border-color: rgba(var(--pos-rgb), 0.18); color: var(--ink-dim); }
+.scope-m { text-align: center; color: var(--ink-faint); }
+.scope[data-has="1"] .scope-m { color: var(--pos); }
+.scope-n { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-dim); }
+.scope[data-has="1"] .scope-n { color: var(--ink); }
+.scope-d { font-size: 12px; }
+.scope-s {
+  font-family: "IBM Plex Mono", monospace; font-size: 10px;
+  letter-spacing: 0.08em; text-transform: uppercase; text-align: right;
+}
+.scope[data-has="1"] .scope-s { color: var(--pos); }
+
+/* ── the roster picker ────────────────────────────────────────────────────── */
+
+.cust {
+  /* THE FIFTH COLLAPSE, and the first one where the COMPOSER was the casualty.
+     Measured in the project view at 1600x1000 with this panel open:
+     .tx = 200 (its floor) and .foot = 117 — the text input and the send button
+     were both below the fold, inside .foot's own overflow-y scroll region.
+     Both existing assertions PASSED while the composer was unusable: the
+     transcript was at its floor, not under it, and .foot's bottom was still
+     inside the window. Nothing checked that .foot could not scroll.
+
+     The cause is the same shape as §9C, one level up. This panel was `flex:
+     none`, so it took its full ~310px and refused to give any of it back. With
+     .tx floored at 200, the only compressible box left in the column was the
+     composer, so the composer absorbed the entire overflow.
+
+     The panel is the right thing to shrink: it is transient — you open it,
+     pick a roster, and dismiss it — it is the tallest block on the view, and a
+     list of agents reads perfectly well scrolled. The composer does not: its
+     send button is at the BOTTOM, so a scrolled composer is a hidden send
+     button, which is §11.9's exact definition of crushed.
+
+     A SHRINK FACTOR HERE DOES NOTHING, and trying one first is how that was
+     learned: .cust lives in .work, the composer lives three levels down inside
+     .panes, and they are not siblings. .panes is `flex: 1` — basis 0 — so .work
+     never overflows and no shrink is ever distributed; .panes simply GROWS into
+     whatever .cust leaves behind. Raising this box's shrink factor to 8 moved
+     the composer from 117px to 90px, i.e. the wrong direction, because the only
+     thing it changed was this box's own min-height.
+
+     What works in a container that never overflows is a CAP. `vh` and not `%`:
+     a percentage max-height resolves against a containing block that is itself
+     flex-sized, which is why the one tried in §9C silently did nothing. vh
+     resolves against the viewport and always has a value. 18vh is 180px at the
+     1000px height every view is measured at — the panel's header, its first
+     grid row and a scrollbar for the rest, which is a picker you scroll rather
+     than a picker that eats the composer.
+
+     The cap alone is still not enough, and the arithmetic says so plainly: at
+     1000px the work area is 781px, and a full-height composer needs
+     65 (pane header) + 200 (transcript floor) + ~255 = 520 of it. So the
+     composer sheds its explanatory chrome while this panel is open — see
+     `.work[data-cust="1"]` below. Two changes, because one of them cannot get
+     there on its own. */
+  display: flex; flex-direction: column; gap: 11px;
+  flex: none; min-height: 92px; overflow-y: auto;
+  margin-bottom: 14px; padding: 14px 16px;
+  border: 1px solid rgba(var(--brass-rgb), 0.3); border-radius: 13px;
+  background: rgba(var(--brass-rgb), 0.04);
+}
+
+/* THE CAP IS SCOPED, because the competition is what makes it necessary.
+   `data-cust` is published only by the view that draws a composer beside this
+   panel (app.js renderProject). The OTHER `.work` — renderEmptyCategory, a
+   project with no agents rostered yet — has no `.panes`, no transcript and no
+   composer, so nothing is competing for the column and there is nothing to
+   protect. An unconditional 18vh squeezed that picker to 180px with ~600px of
+   empty work area under it, and put its "New agent…" row and its explanatory
+   paragraph behind a scrollbar for no reason at all: a cap paid for by the view
+   that did not need it. Selecting on the attribute rather than on its value is
+   deliberate — `data-cust="0"` never renders a `.cust` to cap, and matching the
+   bare attribute keeps this rule tied to "a composer is in this column", which
+   is the actual precondition. */
+/* ── THE SIXTH COLLAPSE, and why the picker came out of the flow ─────────────
+   Every measurement of the fifth fix was taken at ONE viewport, 1600x1000, and
+   it held there. The first run of this pass's new fixture measured 1440 wide at
+   four heights and the composer scrolled its own content at all four:
+
+       1440x1200  cust=216  tx=200  foot=374  footScrolls=true
+       1440x1000  cust=180  tx=200  foot=210  footScrolls=true
+       1440x900   cust=162  tx=200  foot=174  footScrolls=true
+       1440x760   cust=137  tx=200  foot= 59  footScrolls=true   SEND off screen
+
+   A narrower column wraps the composer's own content onto more lines, so its
+   natural height GROWS as the window shrinks — while the cap frees a fixed
+   fraction of a shrinking viewport. The two curves run the wrong way past each
+   other, and no constant fixes that: 18vh was tuned against one width.
+
+   So the picker leaves the flow. As an overlay it is not in the column at all,
+   the composer keeps its natural height and the transcript keeps its floor at
+   every size, and the failure mode stops being a function of the viewport. This
+   is the "other lever" the fifth-collapse note named and declined to pull
+   unasked; the sixth is what it costs to keep not pulling it.
+
+   What this trades: the picker covers the top of the transcript while it is
+   open. It is transient, it has a `done` button, and the thing underneath is a
+   read-only view — against a send button that cannot be reached. It also lets
+   the composer keep its full prose at every size, so the rules that stripped
+   the slash chips, the star-topology caption and the queue warning are gone.
+
+   `data-cust="1"` and not the bare attribute: this is a live state, not a
+   scoping hint, and the empty-project view — which has no composer to protect —
+   keeps its picker in the flow at full height. */
+.work[data-cust="1"] .cust {
+  position: absolute; z-index: 40; top: 0; left: 0; right: 0;
+  max-height: calc(100% - 22px);
+  margin-bottom: 0;
+  /* Opaque, because it is over content now. The tint stays, layered on the
+     panel colour rather than on whatever line of transcript is behind it. */
+  background: linear-gradient(rgba(var(--brass-rgb), 0.06), rgba(var(--brass-rgb), 0.06)), var(--panel);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.55);
+}
+
+.cust-h { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ink-dim); }
+.cust-h b { color: var(--brass); font-weight: 600; }
+.cust-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(258px, 1fr)); gap: 5px; }
+.cust-a {
+  display: grid; grid-template-columns: 15px 1fr auto; align-items: center;
+  column-gap: 9px; row-gap: 1px;
+  padding: 7px 11px;
+  border: 1px solid var(--line-2); border-radius: 10px;
+  background: rgba(var(--ink-rgb), 0.03);
+  color: var(--ink-dim); font: inherit; font-size: 12.5px;
+  text-align: left; cursor: pointer; transition: 0.15s;
+}
+.cust-a:hover { border-color: rgba(var(--brass-rgb), 0.4); background: rgba(var(--ink-rgb), 0.06); }
+.cust-a[data-on="1"] { border-color: rgba(var(--brass-rgb), 0.5); background: rgba(var(--brass-rgb), 0.1); color: var(--brass); }
+.cust-a:disabled { opacity: 0.45; cursor: not-allowed; }
+.cust-a:disabled:hover { border-color: var(--line-2); background: rgba(var(--ink-rgb), 0.03); }
+.cust-m { text-align: center; font-size: 12px; }
+.cust-n { font-weight: 500; }
+.cust-i {
+  grid-column: 2; font-family: "IBM Plex Mono", monospace;
+  font-size: 10px; color: var(--ink-faint);
+}
+.cust-l {
+  grid-row: 1 / span 2; grid-column: 3;
+  font-family: "IBM Plex Mono", monospace; font-size: 9.5px;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint);
+}
+.cust-l[data-live="1"] { color: var(--pos); }
+.cust-new { margin-top: 5px; padding-top: 11px; border-top: 1px solid var(--line); }
+.cust-new .cust-a { max-width: 258px; }
+.cust-why { margin: 8px 0 0; font-size: 11.5px; line-height: 1.55; color: var(--ink-faint); }
+.cust-why b { color: var(--ink-dim); }
+.cust-foot { margin: 0; font-size: 11.5px; color: var(--ink-faint); }
+
+/* WHILE THE ROSTER PICKER IS OPEN, THE COMPOSER SHEDS ITS EXPLANATORY CHROME.
+   Not its controls — its prose. The steering panel is ~380px natural, and most
+   of that is text that explains the panel rather than operating it: the slash
+   command chips, the star-topology caption, and the queue warning. At a 1000px
+   window there is not enough room for that AND a 180px picker AND a 200px
+   transcript floor, and the pixels have to come from somewhere. They come from
+   the sentences, which are still one click away when the picker is dismissed.
+
+   What deliberately STAYS: the header, the ping bubbles, the input and the send
+   button. The ping bubbles look like chrome and are not — they are where the
+   message will go, and hiding live routing state above a live send button would
+   be trading a layout bug for a correctness one. */
+/* The rules that hid the composer's `.cmds`, `.ping-cap` and `.note` while the
+   picker was open are DELETED, not moved. They existed because the picker was
+   in the column and something had to give; an overlay is not in the column, so
+   nothing does. Deleting them puts the slash-command chips, the star-topology
+   caption and the queue warning back on screen at every window size — the queue
+   warning in particular is the single most important sentence in this UI, and
+   it was being hidden to buy 36px for a panel that no longer needs them. */
+
+.mc-cust { font-family: inherit; cursor: pointer; }
+
+/* ── ping bubbles ─────────────────────────────────────────────────────────────
+   The bubbles ARE .page-tab, the same control as the agent strip in the topbar,
+   and they take Atlas's brass .is-active for the selected one. Only the button
+   defaults are reset here — deliberately NOT colour, border or background,
+   because overriding those is exactly how a "reuse" becomes a lookalike.
+
+   Specificity matters and is why .ping-b is a lone class (0,1,0): it sits below
+   .page-tab.is-active (0,2,0), so the selected bubble keeps Atlas's brass
+   background rather than this rule's transparent one. */
+.ping-wrap { display: flex; flex-direction: column; gap: 4px; margin: 0 28px 7px; flex: none; }
+.ping { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.ping-l {
+  font-family: "IBM Plex Mono", monospace; font-size: 10px;
+  letter-spacing: 0.13em; text-transform: uppercase;
+  color: var(--ink-faint); margin-right: 3px;
+}
+.ping-b { background: transparent; font-family: inherit; cursor: pointer; }
+.ping-b[data-none="1"] { border-style: dashed; }
+.ping-note { margin: 0; font-size: 11.5px; line-height: 1.45; color: var(--ink-faint); }
+.ping-note b { color: var(--ink-dim); font-weight: 600; }
+.ping-note[data-k="on"] b { color: var(--brass); }
+.ping-cap { color: var(--ink-faint); opacity: 0.82; }
+.ping-cap b {
+  font-family: "IBM Plex Mono", monospace; font-size: 10px;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint);
+}
+
+/* ── what the gateway said about a write ──────────────────────────────────── */
+
+/* THE REFUSAL BANNER IS CAPPED, and the measurement is why.
+   The composer's natural height was broken down row by row at 1440x900 with a
+   refusal on screen:
+
+       foot-h:13  cmds:22  ping-wrap:46  compose-box:45
+       wr:157  note:18  p-use:29  p-use-2:13        natural 411, available 350
+
+   `.wr` is 157px — the tallest row in the composer by a factor of three, taller
+   than the text input and the send button together, for a banner made of two
+   sentences and a two-line `pre`. It is also a repeat offender: §9C's fourth
+   collapse was "a 94px squeeze from the steering-refusal banner", fixed then by
+   trimming its copy, which is the fix that does not hold the next time the
+   window is a different size.
+
+   Capped instead, with its own scroll. What stays above the fold is what you
+   act on — the heading, the code, and the gateway's own message. What scrolls
+   is the `pre` with the two commands, which is a thing you copy once and not a
+   thing you monitor. The same argument as the picker one screen up: transient
+   prose yields to a live control, never the other way round. */
+.wr {
+  display: flex; align-items: flex-start; gap: 9px; flex: none;
+  max-height: 84px; overflow-y: auto;
+  margin: 8px 28px 0; padding: 9px 13px;
+  border: 1px solid var(--line-2); border-radius: 11px;
+  background: rgba(var(--ink-rgb), 0.04);
+  font-size: 12.5px; line-height: 1.5; color: var(--ink-dim);
+}
+.wr .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); flex: none; margin-top: 5px; }
+.wr[data-k="wait"] .dot { background: var(--brass); animation: pulse 1.1s infinite ease-in-out; }
+.wr[data-k="ok"] { border-color: rgba(var(--pos-rgb), 0.3); background: rgba(var(--pos-rgb), 0.07); }
+.wr[data-k="ok"] .dot { background: var(--pos); }
+.wr[data-k="fail"] { border-color: rgba(var(--neg-rgb), 0.35); background: rgba(var(--neg-rgb), 0.06); }
+.wr[data-k="fail"] .dot { background: var(--neg); }
+.wr b { color: var(--ink); font-weight: 600; }
+.wr[data-k="fail"] b { color: var(--neg); }
+.wr-b { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.wr-t { display: flex; align-items: center; gap: 3px; }
+.wr-x {
+  border: none; background: none; color: var(--ink-faint);
+  font-family: inherit; font-size: 15px; line-height: 1; cursor: pointer; padding: 0 3px;
+}
+.wr-m { color: var(--ink-dim); }
+.wr-fix { font-size: 12px; color: var(--ink-faint); }
+.wr-fix code {
+  font-family: "IBM Plex Mono", monospace; font-size: 11.5px;
+  color: var(--brass); background: rgba(var(--brass-rgb), 0.1);
+  padding: 1px 5px; border-radius: 5px;
+}
+.wr-fix pre {
+  margin: 5px 0 4px; padding: 7px 10px;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: rgba(var(--ink-rgb), 0.05);
+  font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  color: var(--ink-dim); white-space: pre-wrap; word-break: break-word;
+}
+.wr-warn { display: block; color: var(--ink-faint); font-size: 11px; }
+.wr-k { font-size: 11.5px; color: var(--ink-faint); }
+
+/* ── an empty project or tool tab ─────────────────────────────────────────── */
+
+.empty-cat {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 10px;
+  margin: 8px 0; padding: 22px 24px;
+  border: 1px dashed var(--line-2); border-radius: 13px;
+  max-width: 680px;
+}
+.empty-cat b { font-family: "Instrument Serif", serif; font-size: 19px; font-weight: 400; color: var(--ink); }
+.empty-cat p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-faint); }
+.empty-cat-w b {
+  font-family: "Hanken Grotesk", system-ui, sans-serif; font-size: 12.5px;
+  font-weight: 600; color: var(--ink-dim);
+}
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+/* Entrances for the new views, hung on .is-enter like everything else so a
+   re-render never replays them. */
+.cust.is-enter,
+.empty-cat.is-enter { animation-name: pop; }
+.wr.is-enter        { animation-name: fade; }
+
+/* Where a completion summary came from. A finished task carries no field for
+   what it concluded, so when the text is an opening note or a gateway notice
+   rather than the agent's closing words, the row says which. */
+.ibx-src {
+  display: inline-block; margin-right: 7px;
+  font-family: "IBM Plex Mono", monospace; font-size: 9.5px;
+  letter-spacing: 0.07em; text-transform: uppercase;
+  color: var(--ink-faint); border: 1px solid var(--line-2);
+  border-radius: 5px; padding: 1px 5px; vertical-align: 1px;
+}
+/* A task can finish and still never deliver its result — `completed` on the row,
+   nothing at the other end. That is neither success nor failure and gets said. */
+.ibx-blocked { font-size: 11.5px; color: var(--neg); }
+.ibx-blocked b { color: var(--neg); font-weight: 600; }
+
+/* ═══════════════════════════ §C  THE ROOM ═══════════════════════════
+
+   The shared main chat. It reuses .pane / .p-h / .tx / .foot wholesale — same
+   classes, same rules — so the transcript floor that four builds have broken is
+   enforced here by the SAME declaration and asserted by the SAME check, rather
+   than by a second layout nobody thought to measure. Everything below styles
+   only what is genuinely new: a message that has a sender and a recipient.
+
+   The three kinds of speaker are told apart by RAIL COLOUR and nothing else.
+   Brass is spoken for elsewhere in this app — it means "selected" on a tab and
+   "waiting on you" on a mark — so Chancellor's own messages get the ink rail,
+   agents get the signal teal, and Bridge's own notes get no rail and dimmer
+   type. Colour is doing one job here, not three. */
+
+.rm {
+  display: flex; flex-direction: column; gap: 5px;
+  padding: 9px 14px 10px;
+  border-left: 2px solid var(--line-2);
+  border-radius: 0 10px 10px 0;
+  background: rgba(var(--ink-rgb), 0.022);
+}
+.rm[data-from="me"]     { border-left-color: rgba(var(--ink-rgb), 0.42); background: rgba(var(--ink-rgb), 0.05); }
+.rm[data-from="agent"]  { border-left-color: rgba(var(--signal-rgb), 0.55); }
+.rm[data-from="bridge"] { border-left-color: transparent; background: none; padding-left: 4px; }
+.rm[data-kind="error"]  { border-left-color: var(--neg); background: rgba(var(--neg-rgb), 0.06); }
+
+.rm-h {
+  display: flex; align-items: baseline; gap: 8px;
+  font-family: "IBM Plex Mono", monospace; font-size: 10px;
+  letter-spacing: 0.12em; text-transform: uppercase;
+}
+.rm-who { color: var(--ink); font-weight: 600; }
+.rm[data-from="bridge"] .rm-who { color: var(--ink-faint); }
+.rm-id  { color: var(--ink-faint); letter-spacing: 0.06em; text-transform: none; }
+/* The hand-off, which is the one fact this transcript exists to make visible:
+   who was given the turn. It gets the teal because it is the routing, not the
+   speaker. */
+.rm-to {
+  color: var(--signal); letter-spacing: 0.06em; text-transform: none;
+  padding: 1px 7px; border-radius: 999px;
+  border: 1px solid rgba(var(--signal-rgb), 0.3);
+  background: rgba(var(--signal-rgb), 0.08);
+}
+.rm-hop {
+  color: var(--ink-faint); font-size: 9px; letter-spacing: 0.16em;
+  padding: 1px 6px; border-radius: 999px; border: 1px solid var(--line-2);
+}
+.rm-t { color: var(--ink-faint); font-size: 9.5px; letter-spacing: 0.1em; }
+.rm-b {
+  font-size: 13.5px; line-height: 1.58; color: var(--ink);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.rm[data-from="bridge"] .rm-b { font-size: 12.5px; color: var(--ink-dim); }
+.rm[data-kind="error"] .rm-b  { color: var(--neg); }
+
+/* The relay budget, in the pane header. Deliberately plain: it is a number you
+   glance at, and it only becomes interesting when it is nearly spent. */
+.room-budget b { color: var(--ink-dim); }
+
+/* The agent strip in NAV mode sits in the topbar where .page-tabs already has
+   its rules; it needs only to wrap rather than overflow on a narrow window. */
+.agent-strip { flex-wrap: wrap; row-gap: 6px; }
+
+/* ── the microphone ──
+   An open mic you have forgotten about is the failure mode this indicator
+   exists to prevent, so recording gets its own state on .wr rather than
+   borrowing the neutral one, and it pulses. This is a live indicator, not an
+   entrance: it is deliberately `infinite`, like .tmark[data-stale]. */
+.wr[data-k="rec"] { border-color: rgba(var(--neg-rgb), 0.4); background: rgba(var(--neg-rgb), 0.07); }
+.wr[data-k="rec"] .dot { background: var(--neg); animation: rec-pulse 1.15s ease-in-out infinite; }
+.wr[data-k="rec"] b { color: var(--neg); }
+@keyframes rec-pulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.78); } }
+
+/* ── a question in the inbox ──
+   It is a row like any other completion, plus the thing that makes it a
+   question: buttons. Amber, because in this app brass/amber has meant "waiting
+   on you" since v2 and this is the literal case it was named for. */
+.ibx-q { border-color: rgba(var(--brass-rgb), 0.32); background: rgba(var(--brass-rgb), 0.05); cursor: default; }
+.ibx-q .ask-row { margin-top: 9px; flex-wrap: wrap; }
+.q-in { min-width: 240px; }
+
+/* ── running tasks, under the completions ──
+   One line each. This is where the live half of the elapsed rule is visible:
+   these tick, the frozen totals above them do not. */
+.inbox-live { display: flex; flex-direction: column; gap: 4px; }
+.ibl {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 13px; border: 1px solid var(--line); border-radius: 10px;
+  background: rgba(var(--ink-rgb), 0.02);
+  font-size: 12.5px; color: var(--ink-dim);
+}
+.ibl-t { color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46%; }
+.ibl-a, .ibl-k, .ibl-e {
+  font-family: "IBM Plex Mono", monospace; font-size: 10px;
+  letter-spacing: 0.1em; color: var(--ink-faint);
+}
+.ibl-e { color: var(--signal); }

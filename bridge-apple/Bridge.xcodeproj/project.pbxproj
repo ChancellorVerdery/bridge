@@ -1,0 +1,286 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 56;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		B10000000000000000000001 /* BridgeApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000001 /* BridgeApp.swift */; };
+		B10000000000000000000002 /* WebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000002 /* WebView.swift */; };
+		B10000000000000000000003 /* LocalServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000003 /* LocalServer.swift */; };
+		B10000000000000000000004 /* Gateway.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000004 /* Gateway.swift */; };
+		B10000000000000000000005 /* Tunnel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000005 /* Tunnel.swift */; };
+		B10000000000000000000006 /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000006 /* Keychain.swift */; };
+		B10000000000000000000007 /* Smoke.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000007 /* Smoke.swift */; };
+		B10000000000000000000009 /* Prefs.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000009 /* Prefs.swift */; };
+		B10000000000000000000011 /* Room.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000012 /* Room.swift */; };
+		B10000000000000000000012 /* Voice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000013 /* Voice.swift */; };
+		B10000000000000000000010 /* dist in Resources */ = {isa = PBXBuildFile; fileRef = A10000000000000000000010 /* dist */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000001 /* BridgeApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BridgeApp.swift; sourceTree = "<group>"; };
+		A10000000000000000000002 /* WebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebView.swift; sourceTree = "<group>"; };
+		A10000000000000000000003 /* LocalServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalServer.swift; sourceTree = "<group>"; };
+		A10000000000000000000004 /* Gateway.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Gateway.swift; sourceTree = "<group>"; };
+		A10000000000000000000005 /* Tunnel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Tunnel.swift; sourceTree = "<group>"; };
+		A10000000000000000000006 /* Keychain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Keychain.swift; sourceTree = "<group>"; };
+		A10000000000000000000007 /* Smoke.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Smoke.swift; sourceTree = "<group>"; };
+		A10000000000000000000009 /* Prefs.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Prefs.swift; sourceTree = "<group>"; };
+		A10000000000000000000012 /* Room.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Room.swift; sourceTree = "<group>"; };
+		A10000000000000000000013 /* Voice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Voice.swift; sourceTree = "<group>"; };
+		A10000000000000000000008 /* Bridge.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Bridge.entitlements; sourceTree = "<group>"; };
+		A10000000000000000000010 /* dist */ = {isa = PBXFileReference; lastKnownFileType = folder; name = dist; path = "../bridge-ui/dist"; sourceTree = "<group>"; };
+		A10000000000000000000011 /* Bridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Bridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		C10000000000000000000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		F10000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				F10000000000000000000003 /* Bridge */,
+				A10000000000000000000010 /* dist */,
+				F10000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		F10000000000000000000003 /* Bridge */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000001 /* BridgeApp.swift */,
+				A10000000000000000000002 /* WebView.swift */,
+				A10000000000000000000003 /* LocalServer.swift */,
+				A10000000000000000000004 /* Gateway.swift */,
+				A10000000000000000000005 /* Tunnel.swift */,
+				A10000000000000000000006 /* Keychain.swift */,
+				A10000000000000000000007 /* Smoke.swift */,
+				A10000000000000000000009 /* Prefs.swift */,
+				A10000000000000000000012 /* Room.swift */,
+				A10000000000000000000013 /* Voice.swift */,
+				A10000000000000000000008 /* Bridge.entitlements */,
+			);
+			path = Bridge;
+			sourceTree = "<group>";
+		};
+		F10000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A10000000000000000000011 /* Bridge.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D10000000000000000000001 /* Bridge */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = E10000000000000000000003 /* Build configuration list for PBXNativeTarget "Bridge" */;
+			buildPhases = (
+				C10000000000000000000001 /* Sources */,
+				C10000000000000000000002 /* Frameworks */,
+				C10000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Bridge;
+			productName = Bridge;
+			productReference = A10000000000000000000011 /* Bridge.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		F10000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+				TargetAttributes = {
+					D10000000000000000000001 = {
+						CreatedOnToolsVersion = 26.0;
+					};
+				};
+			};
+			buildConfigurationList = E10000000000000000000006 /* Build configuration list for PBXProject "Bridge" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = F10000000000000000000002;
+			productRefGroup = F10000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D10000000000000000000001 /* Bridge */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		C10000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000010 /* dist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		C10000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B10000000000000000000001 /* BridgeApp.swift in Sources */,
+				B10000000000000000000002 /* WebView.swift in Sources */,
+				B10000000000000000000003 /* LocalServer.swift in Sources */,
+				B10000000000000000000004 /* Gateway.swift in Sources */,
+				B10000000000000000000005 /* Tunnel.swift in Sources */,
+				B10000000000000000000006 /* Keychain.swift in Sources */,
+				B10000000000000000000007 /* Smoke.swift in Sources */,
+				B10000000000000000000009 /* Prefs.swift in Sources */,
+				B10000000000000000000011 /* Room.swift in Sources */,
+				B10000000000000000000012 /* Voice.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		E10000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Bridge/Bridge.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ABCDE12345;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Bridge;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Bridge records audio only while you hold the space bar in its composer, and transcribes it on this Mac.";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = net.myatlasapp.bridge;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Debug;
+		};
+		E10000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Bridge/Bridge.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ABCDE12345;
+				ENABLE_HARDENED_RUNTIME = NO;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = Bridge;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Bridge records audio only while you hold the space bar in its composer, and transcribes it on this Mac.";
+				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = net.myatlasapp.bridge;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+			};
+			name = Release;
+		};
+		E10000000000000000000004 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		E10000000000000000000005 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_MODULES = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_NO_COMMON_BLOCKS = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				SDKROOT = macosx;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		E10000000000000000000003 /* Build configuration list for PBXNativeTarget "Bridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E10000000000000000000001 /* Debug */,
+				E10000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		E10000000000000000000006 /* Build configuration list for PBXProject "Bridge" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E10000000000000000000004 /* Debug */,
+				E10000000000000000000005 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = F10000000000000000000001 /* Project object */;
+}

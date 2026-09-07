@@ -1,0 +1,15 @@
+# Xcode derived data — 384M of object files and build products.
+bridge-apple/build/
+
+# bridge-ui/dist is not source: mkdist.sh copies bridge-ui/*.{js,css,html} into
+# it verbatim, and build.sh deletes and re-creates it on every build. Tracking it
+# would mean every build shows up as a diff of files that already exist upstairs.
+bridge-ui/dist/
+
+# Screenshot output from the --shot harness.
+shots/
+
+# Built application bundles.
+*.app/
+
+.DS_Store

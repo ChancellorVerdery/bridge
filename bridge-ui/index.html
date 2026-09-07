@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en" data-page="bridge">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Bridge</title>
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="atlas.css">
+<link rel="stylesheet" href="app.css">
+</head>
+<body data-split="0">
+
+<!-- Atlas's shell, class for class: .app grid, .sidebar with its three regions,
+     .main holding .topbar (.topbar__lead = crumb + title + page-tabs) and
+     .content. JS fills the same mount ids Atlas's renderer.js fills. The two
+     additions are #alarm, which has to outrank the page title, and .mc-sub.
+
+     The one thing that is NOT Atlas's is the brand: Atlas signs its sidebar
+     with a badge, Bridge signs its with type. Same face, same brass, no
+     borrowed insignia — see .brand__name / .brand__rule in app.css. -->
+<div class="app">
+  <aside class="sidebar">
+    <div class="sidebar__head">
+      <div class="brand">
+        <span class="brand__text">
+          <span class="brand__name">Bridge</span>
+          <span class="brand__rule" aria-hidden="true"></span>
+        </span>
+      </div>
+    </div>
+
+    <div class="sidebar__body">
+      <nav class="nav" id="nav" aria-label="Primary"></nav>
+    </div>
+
+    <div class="sidebar__foot" id="sidebar-foot"></div>
+  </aside>
+
+  <main class="main">
+    <div id="alarm"></div>
+    <header class="topbar">
+      <div class="topbar__lead">
+        <p class="crumb" id="crumb"></p>
+        <h1 class="title" id="title"></h1>
+        <p class="mc-sub" id="mc-sub"></p>
+        <nav class="page-tabs" id="page-tabs" aria-label="Sessions"></nav>
+      </div>
+      <div class="topbar__actions" id="topbar-actions"></div>
+    </header>
+    <section class="content" id="content"></section>
+  </main>
+</div>
+
+<noscript><p style="color:#e9e7df;font:14px monospace;padding:26px">Bridge needs JavaScript.</p></noscript>
+<script src="data.js"></script>
+<script src="app.js"></script>
+<script src="live.js"></script>
+</body>
+</html>

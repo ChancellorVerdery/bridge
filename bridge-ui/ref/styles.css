@@ -1,0 +1,2938 @@
+/* Atlas control UI — "observatory" theme.
+   Display: Instrument Serif · UI: Hanken Grotesk · Labels: IBM Plex Mono */
+
+:root {
+  /* dark app — render native controls (selects, checkboxes, number spinners,
+     dropdowns, scrollbars) in dark mode so they match the scheme instead of
+     defaulting to bright white. */
+  color-scheme: dark;
+  /* The Brass scheme, also the fallback: theme.js writes this same set onto
+     :root at boot, so anything styled here follows the user's colour scheme.
+     The -rgb triplets are what let rules use the accent at partial alpha —
+     rgba() can't take a hex custom property. */
+  --bg: #090b11;
+  --panel: #0e1219;
+  --ink: #e9e7df;
+  --ink-dim: #9aa0ad;
+  --ink-faint: #5c616e;
+  --brass: #e0b15c;
+  --brass-deep: #b9863a;
+  --signal: #74d6c4;
+  --on-accent: #14100a; /* text drawn on the accent; theme.js flips it per scheme */
+  --pos: #5fd08a;  /* money in, ahead, streaks — theme.js sets these per scheme */
+  --neg: #e08c8c;  /* money out, late, behind */
+  --pos-rgb: 95, 208, 138;
+  --neg-rgb: 224, 140, 140;
+  --brass-rgb: 224, 177, 92;
+  --ink-rgb: 202, 214, 242;
+  --signal-rgb: 116, 214, 196;
+  --line: rgba(var(--ink-rgb), 0.08);
+  --line-2: rgba(var(--ink-rgb), 0.15);
+}
+
+* { box-sizing: border-box; }
+
+/* Scrollbars hidden app-wide (content stays scrollable) — no visible track or
+   thumb on any scroller, desktop or mobile. Elements keep horizontal scrolling
+   only where they set overflow-x themselves (.cp-classes, .st-flash__content);
+   the page itself never scrolls sideways (see .content overflow-x:hidden). */
+* { scrollbar-width: none; }
+::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+html, body { height: 100%; }
+
+body {
+  margin: 0;
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+:focus-visible {
+  outline: 2px solid var(--brass);
+  outline-offset: 2px;
+  border-radius: 8px;
+}
+
+/* ---- shell -------------------------------------------------------------- */
+
+.app {
+  position: relative;
+  height: 100vh;
+  display: grid;
+  grid-template-columns: 248px 1fr;
+  /* clamp the single row to the viewport: a tall sidebar (big customize
+     palette) must scroll internally, not stretch the whole app */
+  grid-template-rows: minmax(0, 1fr);
+  background:
+    radial-gradient(120% 80% at -10% -12%, rgba(var(--brass-rgb), 0.10), transparent 45%),
+    radial-gradient(90% 70% at 112% -5%, rgba(var(--signal-rgb), 0.05), transparent 50%),
+    radial-gradient(circle at 1px 1px, rgba(var(--ink-rgb), 0.05) 1px, transparent 0) 0 0 / 26px 26px,
+    var(--bg);
+}
+
+/* ---- sidebar ------------------------------------------------------------ */
+
+.sidebar {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* the surface pair, kept translucent for the blur behind it — as literals
+     this stayed dark in light mode, with dark text on it */
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--panel) 92%, transparent),
+    color-mix(in srgb, var(--bg) 92%, transparent));
+  border-right: 1px solid var(--line);
+  backdrop-filter: blur(6px);
+}
+
+/* Brand + nav label never scroll; only the middle region does (the plugin
+   list, or — while customizing — the widget palette in its place). Same
+   "never stretch .app" guarantee as before, just one layer down: min-height:0
+   + overflow-y:auto move from .sidebar itself onto .sidebar__body, so a tall
+   palette scrolls internally there instead of growing .sidebar past the grid
+   row's fixed height. */
+.sidebar__head { flex: none; padding: 36px 18px 10px; border-bottom: 1px solid var(--line); }
+.sidebar__body { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 18px 10px; }
+.sidebar__foot { flex: none; padding: 8px 18px 18px; border-top: 1px solid var(--line); }
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 8px 20px;
+  animation: rise 0.6s 0.04s both ease-out;
+}
+.brand__mark {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+}
+.brand__img {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: block;
+  box-shadow: 0 8px 22px -10px rgba(58, 123, 213, 0.65), inset 0 0 0 1px rgba(var(--ink-rgb), 0.04);
+}
+.brand__name {
+  font-family: "Instrument Serif", serif;
+  font-size: 25px;
+  line-height: 1;
+  letter-spacing: 0.3px;
+}
+
+.nav { display: flex; flex-direction: column; gap: 3px; }
+.nav__head {
+  margin: 2px 0 10px;
+  padding: 0 12px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  animation: rise 0.6s 0.12s both ease-out;
+}
+.nav__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 11px 12px;
+  border-radius: 10px;
+  color: var(--ink-dim);
+  text-decoration: none;
+  font-size: 14.5px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  transition: color 0.18s, background 0.18s, transform 0.18s;
+}
+.nav a.nav__item:nth-of-type(1) { animation: rise 0.6s 0.18s both ease-out; }
+.nav a.nav__item:nth-of-type(2) { animation: rise 0.6s 0.26s both ease-out; }
+.nav__item:hover {
+  color: var(--ink);
+  background: rgba(var(--ink-rgb), 0.045);
+  transform: translateX(2px);
+}
+.nav__icon { width: 18px; height: 18px; opacity: 0.78; transition: 0.18s; flex: none; }
+.nav__item:hover .nav__icon { opacity: 1; }
+.nav__label { flex: 1; }
+.nav__dot { width: 5px; height: 5px; border-radius: 50%; background: transparent; transition: 0.18s; }
+/* Drag-to-reorder (behavior lives in renderer.js, view-mode nav only — the
+   rows themselves are what's absent once Customize hides #nav for the
+   widget palette, so there's nothing to reorder there). */
+.nav__item[draggable="true"] { cursor: grab; }
+.nav__item.is-dragging { opacity: 0.4; }
+
+.nav__item.is-active {
+  color: var(--ink);
+  background: linear-gradient(90deg, rgba(var(--brass-rgb), 0.13), rgba(var(--brass-rgb), 0.02));
+}
+.nav__item.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 9px;
+  bottom: 9px;
+  width: 2.5px;
+  border-radius: 3px;
+  background: linear-gradient(var(--brass), var(--brass-deep));
+  box-shadow: 0 0 12px rgba(var(--brass-rgb), 0.65);
+}
+.nav__item.is-active .nav__icon { color: var(--brass); opacity: 1; }
+.nav__item.is-active .nav__dot { background: var(--brass); box-shadow: 0 0 8px var(--brass); }
+
+/* ---- main --------------------------------------------------------------- */
+
+.main {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow: hidden;
+}
+.topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 32px 40px 22px;
+  border-bottom: 1px solid var(--line);
+  animation: rise 0.6s 0.2s both ease-out;
+}
+.crumb {
+  margin: 0 0 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.title {
+  margin: 0;
+  font-family: "Instrument Serif", serif;
+  font-weight: 400;
+  font-size: 42px;
+  line-height: 1;
+  letter-spacing: 0.2px;
+}
+
+.topbar__actions { display: flex; align-items: center; gap: 10px; padding-bottom: 6px; }
+html[data-page="settings"] .topbar__actions { display: none; }
+html[data-page="gym-settings"] .topbar__actions { display: none; }
+
+/* Plugin-scoped tab bar under the page title (e.g. Gym: Board | Settings). */
+.page-tabs { display: flex; gap: 6px; margin-top: 10px; }
+.page-tabs:empty { display: none; }
+/* inline-flex (not inline): an inline <a> ignores min-height and box sizing, so
+   tabs rendered at slightly different heights. Every tab is now the same box —
+   the active one differs only in colour/border/background, never in size. */
+.page-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 13px;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.2;
+  transition: 0.15s;
+}
+.page-tab:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.05); }
+.page-tab.is-active { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.5); background: rgba(var(--brass-rgb), 0.1); }
+
+.action-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 15px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: rgba(var(--ink-rgb), 0.03);
+  color: var(--ink-dim);
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: 0.18s;
+}
+.action-btn svg { width: 16px; height: 16px; opacity: 0.8; }
+.action-btn:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.06); }
+.action-btn.is-active {
+  color: var(--brass);
+  border-color: rgba(var(--brass-rgb), 0.5);
+  background: rgba(var(--brass-rgb), 0.1);
+}
+
+/* Vertical scroll only — overflow-x:hidden guarantees no page ever scrolls
+   left/right (the widget row model collapses to a column on mobile). Scrollbar
+   hidden (scrollbar-width:none + the webkit rule) but the area stays scrollable. */
+.content { position: relative; flex: 1; overflow-y: auto; overflow-x: hidden; padding: 40px; scrollbar-width: none; }
+.content::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* ---- empty state -------------------------------------------------------- */
+
+.empty {
+  height: 100%;
+  min-height: 360px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 18px;
+  border: 1px dashed var(--line-2);
+  border-radius: 16px;
+  background: radial-gradient(58% 56% at 50% 40%, rgba(var(--brass-rgb), 0.045), transparent 70%);
+  animation: rise 0.5s both ease-out;
+}
+.empty__mark { color: var(--brass); opacity: 0.85; animation: float 7s ease-in-out infinite; }
+.empty__title { margin: 0; font-family: "Instrument Serif", serif; font-weight: 400; font-size: 26px; color: var(--ink); }
+.empty__text { margin: 0; max-width: 360px; font-size: 13.5px; line-height: 1.65; color: var(--ink-dim); }
+.empty__tag {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  padding: 6px 13px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+}
+
+.chart { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.chart__grad-a { stop-color: var(--brass); }
+.chart__grad-b { stop-color: var(--brass-deep); }
+.chart__bar { opacity: 0.88; transition: opacity 0.15s; }
+.chart__bar:hover { opacity: 1; }
+/* line chart — teal signal accent, distinct from the brass bars */
+.chart__line { fill: none; stroke: var(--signal); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.chart__dot { fill: var(--signal); }
+.chart__area-a { stop-color: var(--signal); stop-opacity: 0.22; }
+.chart__area-b { stop-color: var(--signal); stop-opacity: 0; }
+.chart__grid { stroke: var(--line); stroke-width: 1; }
+.chart__axis { stroke: var(--line-2); stroke-width: 1.2; }
+/* invisible per-datum hover target (see chart.js's hitTargets) — painted
+   (transparent, not `fill:none`) so it still receives pointer events */
+.chart__hit { fill: transparent; }
+.chart__xlab { font-family: "IBM Plex Mono", monospace; font-size: 9.5px; fill: var(--ink-dim); }
+.chart__ylab { font-family: "IBM Plex Mono", monospace; font-size: 9px; fill: var(--ink-faint); }
+.chart__axis-title {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  fill: var(--ink-faint);
+}
+.card {
+  padding: 20px 22px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: linear-gradient(180deg, rgba(var(--ink-rgb), 0.03), rgba(var(--ink-rgb), 0.01));
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.card:hover { border-color: var(--line-2); background: rgba(var(--ink-rgb), 0.05); }
+.card__title {
+  margin: 0 0 8px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+.card__body {
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--ink-dim);
+  /* the edit textarea and the modal both honor newlines — the card must too */
+  white-space: pre-wrap;
+  /* clamp to a fixed number of lines so the card never grows to fit its
+     content — overflow is cut and shown as an ellipsis instead. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+
+/* ---- card modal ---------------------------------------------------------- */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  background: rgba(5, 6, 10, 0.6);
+  backdrop-filter: blur(3px);
+  animation: fade 0.15s both ease-out;
+}
+.modal {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 762px; /* 1.7x, then 20% smaller */
+  max-height: 80vh;
+  overflow: hidden;
+  padding: 26px 28px;
+  border: 1px solid var(--line-2);
+  border-radius: 16px;
+  background: var(--panel);
+  box-shadow: 0 24px 60px -20px rgba(0, 0, 0, 0.6);
+  animation: pop 0.18s both ease-out;
+}
+.modal__title {
+  margin: 0 0 14px;
+  flex: none;
+  font-family: "Instrument Serif", serif;
+  font-weight: 400;
+  font-size: 24px;
+  color: var(--ink);
+}
+.modal__body { flex: 1; overflow: auto; font-size: 14px; line-height: 1.7; color: var(--ink-dim); white-space: pre-wrap; scrollbar-width: none; }
+/* Opts out of the JS-applied window-aspect lock (renderer.js's
+   syncModalAspect): no forced aspect-ratio, so the box's height is driven by
+   its own content up to max-height instead of by the window's shape — the
+   custom colour editor needs its whole layout visible, never scrolled. Width
+   stays the normal fixed max-width (unchanged) so the wheel/inputs row keeps
+   its usual layout room; .modal__body's overflow:auto stays too, as a
+   fallback for a window too short to fit even this. */
+.modal--fit { max-height: 92vh; }
+.modal__body::-webkit-scrollbar { width: 0; height: 0; display: none; }
+
+/* Confirm-modal action row (confirm.js) + its two buttons. .btn-danger is the
+   destructive confirm (--neg), .btn-cancel the ghost dismiss. */
+.modal__actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 16px; }
+.btn-danger, .btn-cancel {
+  padding: 9px 16px; border-radius: 10px; border: 1px solid transparent;
+  font-family: "Hanken Grotesk", system-ui, sans-serif; font-size: 13px; font-weight: 600;
+  cursor: pointer; transition: 0.15s;
+}
+.btn-danger { border-color: rgba(var(--neg-rgb), 0.5); background: rgba(var(--neg-rgb), 0.12); color: var(--neg); }
+.btn-danger:hover { background: rgba(var(--neg-rgb), 0.2); }
+.btn-cancel { border-color: var(--line-2); background: transparent; color: var(--ink-dim); }
+.btn-cancel:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.05); }
+
+/* ---- chart modal (click any bar/line chart to view it large + hover) ---- */
+
+.modal--chart { max-width: 1040px; }
+.chart-modal-mount { height: 62vh; min-height: 320px; }
+.chart-tooltip {
+  position: fixed;
+  z-index: 70; /* above .modal-overlay's 60 */
+  left: 0;
+  top: 0;
+  pointer-events: none; /* never steal the hover from the chart under it */
+  padding: 6px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 10px 26px -10px rgba(0, 0, 0, 0.6);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 12px;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* ---- pages / settings --------------------------------------------------- */
+
+.page { max-width: 760px; animation: rise 0.4s both ease-out; }
+.page__lead { margin: 0 0 22px; font-size: 14px; line-height: 1.6; color: var(--ink-dim); }
+
+.set-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: rgba(var(--ink-rgb), 0.02);
+}
+.set-row__meta { display: flex; flex-direction: column; gap: 3px; }
+.set-row__name { font-size: 14.5px; font-weight: 500; color: var(--ink); }
+.set-row__sub { font-size: 12.5px; color: var(--ink-dim); }
+
+.switch {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  flex: none;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: rgba(var(--ink-rgb), 0.05);
+  cursor: pointer;
+  transition: 0.18s;
+}
+.switch__dot {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  transition: 0.18s;
+}
+.switch.is-on { background: linear-gradient(180deg, rgba(var(--brass-rgb), 0.35), rgba(var(--brass-rgb), 0.18)); border-color: rgba(var(--brass-rgb), 0.5); }
+.switch.is-on .switch__dot { left: 20px; background: var(--brass); box-shadow: 0 0 10px rgba(var(--brass-rgb), 0.6); }
+
+
+/* ---- page (rows → cols → lines → widgets) -------------------------------- */
+
+.page-root { display: flex; flex-direction: column; gap: 18px; }
+.page-root--empty { height: 100%; }
+.prow { position: relative; display: flex; flex-direction: column; gap: 12px; }
+.prow-body { display: flex; gap: 18px; flex: 1 1 auto; min-width: 0; }
+.prow-title {
+  margin: 0;
+  font-family: "Instrument Serif", serif;
+  /* Instrument Serif ships only 400 — the browser synthesizes the bold */
+  font-weight: 700;
+  font-size: 34px;
+  line-height: 1.15;
+  letter-spacing: 0.2px;
+  color: var(--ink);
+}
+.prow-title-input { max-width: 460px; font-family: "Instrument Serif", serif; font-weight: 700; font-size: 23px; }
+/* Section titles: regular UI font, dimmer so the row heading stays the
+   dominant label. */
+.psec-title {
+  margin: 0;
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  font-weight: 400;
+  font-size: 21px;
+  letter-spacing: 0.1px;
+  color: var(--ink-dim);
+}
+.psec-title-input { max-width: 340px; font-size: 17px; }
+.pcol { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+/* The section: the user-visible group inside a column. A section hugs its
+   content — the column stretches to the row's (tallest sibling's) height,
+   and a stretching section drew its customize-mode frame far taller than the
+   short list inside it. Only sections holding a fill-height widget (charts
+   &c. — anything NOT in the hug list below; keep the two lists in sync)
+   still share the column's height so graphs stretch to the row. */
+.psec { display: flex; flex-direction: column; gap: 18px; flex: 0 1 auto; min-width: 0; }
+.psec:has(.pwidget:not(.pwidget--card, .pwidget--list, .pwidget--eqcard, .pwidget--eqlist)) { flex: 1 1 auto; }
+/* Widgets fill their section in both axes. Width: equal-share flex all the
+   way down. Height: columns already stretch to the row (flex default), lines
+   grow to share their column's height (auto basis — content sets the floor,
+   extra space is spread evenly), and each widget box stretches to its line
+   (cross-axis default). Cards/lists grow as boxes; graphs actually rescale
+   (flexing chart-mount below + the ResizeObserver redraw). */
+.pline { display: flex; gap: 18px; flex: 1 1 auto; }
+.pwidget { flex: 1 1 0; min-width: 0; position: relative; cursor: default; }
+/* Short widgets (cards, lists, equations) top-align instead of stretching to a
+   taller sibling column's height, which left them as tall, mostly-empty boxes.
+   Graphs keep the default stretch so their chart mount fills the row.
+   (This hug list is mirrored by the .psec :has() rule above — sections with
+   only these widgets hug their content too; keep the two in sync.) */
+.pwidget--card, .pwidget--list, .pwidget--eqcard, .pwidget--eqlist { align-self: flex-start; }
+/* While editing, the live MathLive field can't scale-to-fit like the read-only
+   render does, so floor equation widgets so several on one line stay usable
+   instead of collapsing to a single glyph. */
+body.customizing .pwidget--eqcard, body.customizing .pwidget--eqlist { min-width: 11rem; }
+.pwidget--graph { display: flex; flex-direction: column; }
+body:not(.customizing) .pwidget--card { cursor: pointer; }
+body.customizing .pwidget { cursor: grab; }
+body.customizing .pwidget:active { cursor: grabbing; }
+
+/* Charts draw into the mount at its real px size (see drawChart in view.js);
+   fixed height for now — no manual resizing in this pass, width tracks the
+   widget's equal share and the ResizeObserver redraws on any change. */
+.chart-mount { position: relative; overflow: hidden; }
+.pwidget--graph .chart-mount { flex: 1 1 auto; min-height: 220px; }
+/* every chart-mount drawChart marks with data-chart is click-to-enlarge
+   (chartmodal.js) — customize mode leaves them inert, so no pointer cursor */
+body:not(.customizing) .chart-mount[data-chart] { cursor: pointer; }
+
+.pw-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.pw-list__item {
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(var(--ink-rgb), 0.02);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--ink-dim);
+}
+
+/* ---- customize mode ------------------------------------------------------ */
+
+/* Structure made visible while editing: a faint brass frame around each ROW
+   and a fainter gray frame around each SECTION (column) inside it, so the
+   drop grammar (join a section vs. new section vs. new row) has something to
+   read against. Thin + low-contrast on purpose — scaffolding, not chrome. */
+body.customizing .prow {
+  border: 1px dashed rgba(var(--brass-rgb), 0.28);
+  border-radius: 16px;
+  padding: 9px;
+}
+body.customizing .psec {
+  border: 1px dashed var(--line-2);
+  border-radius: 12px;
+  padding: 7px;
+}
+
+/* Column resize: in customize mode the row's 18px gaps are replaced by
+   equally-wide drag bars, so column proportions match view mode exactly.
+   Subtle line, gold when engaged — same visual language as the old builder. */
+body.customizing .prow-body { gap: 0; }
+body.customizing .prow-body > .drop-ghost { margin: 0 9px; }
+.pcol-resize {
+  flex: 0 0 18px;
+  align-self: stretch;
+  position: relative;
+  cursor: col-resize;
+}
+.pcol-resize::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--line-2);
+  border-radius: 1px;
+  transition: background 0.1s ease, width 0.1s ease;
+}
+.pcol-resize:hover::after,
+.pcol-resize.is-resizing::after {
+  width: 3px;
+  background: #f0c463;
+}
+body.resizing-col { cursor: col-resize; user-select: none; }
+
+/* Whole-row width handle riding the row's right edge (customize only —
+   it's only rendered there). Same visual language as the section bars. */
+.prow-resize {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  right: -9px;
+  width: 18px;
+  cursor: ew-resize;
+  z-index: 4;
+}
+.prow-resize::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  transform: translateX(-50%);
+  background: var(--line-2);
+  border-radius: 1px;
+  transition: background 0.1s ease, width 0.1s ease;
+}
+.prow-resize:hover::after,
+.prow-resize.is-resizing::after {
+  width: 3px;
+  background: #f0c463;
+}
+
+/* Row HEIGHT handle along the bottom edge, inset on the right so it never
+   overlaps the width handle at the corner. */
+.prow-hresize {
+  position: absolute;
+  left: 6px;
+  right: 24px;
+  bottom: -9px;
+  height: 18px;
+  cursor: ns-resize;
+  z-index: 4;
+}
+.prow-hresize::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  right: 0;
+  height: 2px;
+  transform: translateY(-50%);
+  background: var(--line-2);
+  border-radius: 1px;
+  transition: background 0.1s ease, height 0.1s ease;
+}
+.prow-hresize:hover::after,
+.prow-hresize.is-resizing::after {
+  height: 3px;
+  background: #f0c463;
+}
+body.resizing-row { cursor: ns-resize; user-select: none; }
+
+.pwidget.is-dragging, .prow.is-dragging { opacity: 0.4; }
+
+/* The drop preview: a real element inserted at the target position (see
+   placeGhost in customize.js), so the browser computes the true post-drop
+   layout and neighbors FLIP to their genuine final places. As a flex sibling
+   it takes the same equal share a dropped widget would; as a new line/row
+   band (--band) nothing constrains it vertically, so it gets a fixed
+   representative height. */
+.drop-ghost {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 96px;
+  border: 1.5px dashed var(--brass);
+  border-radius: 14px;
+  background: rgba(var(--brass-rgb), 0.07);
+  pointer-events: none;
+}
+.drop-ghost--band { flex: 0 0 auto; }
+/* Stack preview: floats in the dead space below a short widget (appended
+   inside the widget's position:relative box, so layout never shifts). */
+.drop-ghost--stack { position: absolute; top: calc(100% + 12px); left: 0; right: 0; height: 96px; min-height: 0; }
+
+.pw-delete {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  background: var(--panel);
+  color: var(--ink-dim);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.pw-delete:hover { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.5); background: rgba(var(--brass-rgb), 0.08); }
+
+/* Row drag grip in the content's left padding (40px), outside the row's own
+   box so it never collides with widget hit zones. */
+.prow-handle {
+  position: absolute;
+  left: -28px;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--ink-faint);
+  font-size: 12px;
+  letter-spacing: -1px;
+  cursor: grab;
+  user-select: none;
+  transition: 0.15s;
+}
+.prow-handle:hover { color: var(--brass); background: rgba(var(--brass-rgb), 0.08); }
+.prow-handle:active { cursor: grabbing; }
+
+.page-empty-drop {
+  height: 100%;
+  min-height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed var(--line-2);
+  border-radius: 16px;
+  color: var(--ink-faint);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+.page-empty-drop.is-over { border-color: var(--brass); background: rgba(var(--brass-rgb), 0.06); color: var(--brass); }
+
+/* ---- palette (in #nav, replacing the nav rows while customizing) --------- */
+
+.palette {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fade 0.15s both ease-out;
+}
+.palette__head {
+  margin: 0 0 4px;
+  padding: 0 6px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.palette__cat {
+  margin: 10px 0 2px;
+  padding: 0 6px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.palette__item {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 13px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  background: rgba(var(--ink-rgb), 0.03);
+  cursor: grab;
+  transition: border-color 0.15s, background 0.15s;
+}
+.palette__item:hover { border-color: rgba(var(--brass-rgb), 0.5); background: rgba(var(--brass-rgb), 0.07); }
+.palette__item:active { cursor: grabbing; }
+.palette__label { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.palette__hint { font-size: 11.5px; line-height: 1.4; color: var(--ink-dim); }
+
+/* ---- inline edit fields --------------------------------------------------- */
+
+.pw-field {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  background: rgba(var(--ink-rgb), 0.03);
+  color: var(--ink);
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  font-size: 13px;
+}
+.pw-field:focus { outline: none; border-color: var(--brass); }
+.pw-field--title { margin-bottom: 8px; font-weight: 600; }
+/* resize:none — a native resize grip would read as widget resizing, which
+   this pass deliberately doesn't have (and it wouldn't persist anyway). */
+.pw-field--text { display: block; min-height: 72px; max-height: 40vh; line-height: 1.5; resize: none; field-sizing: content; overflow-y: auto; }
+.pw-field--select { cursor: pointer; }
+/* input + literal unit suffix ("%", "nights") kept on one line so the suffix
+   never wraps beneath its input in a narrow settings control cell */
+.set-suffix { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.set-suffix .wk-num { flex: none; }
+
+.pw-list-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.pw-list-row .pw-field { flex: 1; }
+.pw-item-remove {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line-2);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.pw-item-remove:hover { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.5); }
+.pw-add-item {
+  padding: 7px 12px;
+  border: 1px dashed var(--line-2);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.pw-add-item:hover { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.5); }
+
+.pw-graph-controls { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.pw-graph-controls .pw-field { flex: 1 1 8rem; min-width: 0; }
+
+/* ---- equations (MathLive) ------------------------------------------------- */
+
+/* The editable math field (customize mode). Typing builds structures live:
+   sqrt → √ with the caret inside, ^ → superscript slot, cos → \cos, …
+   Padding is symmetric — the field's own ☰ menu/keyboard-toggle icons are
+   hidden (below; a single corner control replaces them, see renderer.js),
+   so there's no floating icon on the right edge to clear any more. */
+math-field.pw-mathfield {
+  display: block;
+  width: 100%;
+  min-height: 50px;
+  padding: 10px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 11px;
+  background: rgba(var(--ink-rgb), 0.035);
+  color: var(--ink);
+  font-size: 19.5px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background 0.15s ease;
+  --caret-color: var(--brass);
+  --selection-background-color: rgba(var(--brass-rgb), 0.25);
+  --contains-highlight-background-color: rgba(var(--brass-rgb), 0.12);
+}
+math-field.pw-mathfield:hover { border-color: var(--line-2); background: rgba(var(--ink-rgb), 0.05); }
+math-field.pw-mathfield:focus-within {
+  outline: none;
+  border-color: var(--brass);
+  background: rgba(var(--ink-rgb), 0.05);
+  box-shadow: 0 0 0 3px rgba(var(--brass-rgb), 0.14);
+}
+
+/* Rendered (read-only) math in view mode and the modal. Never scrolls —
+   .eq-render__inner scales down (JS, view.js fitEquations) to fit instead. */
+.eq-render { font-size: 19px; color: var(--ink); overflow: hidden; padding: 2px 0; }
+.eq-render__inner { display: inline-block; transform-origin: left top; }
+.eq-render--invalid { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--ink-dim); }
+.modal__math .eq-render { font-size: 30px; padding: 14px 0; }
+
+/* Equation list rows: name ABOVE its equation, in both modes. While editing,
+   the remove × sits beside the name; the math field spans the full width. */
+.pw-eq-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 6px 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+/* The editable field spans the FULL row width (col 1 to end) rather than only
+   the name+remove columns — in a narrow customize column that reclaim is the
+   difference between an editable equation and a single clipped glyph. */
+.pw-eq-row math-field.pw-mathfield { grid-column: 1 / -1; min-width: 0; }
+.pw-eq-row .pw-item-remove { grid-area: 1 / 3; }
+/* Grip sits on the name row only so the equation field below can use its width. */
+.pw-eq-grip {
+  grid-row: 1;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  padding: 0 5px;
+  border-radius: 7px;
+  color: var(--ink-faint);
+  font-size: 11px;
+  letter-spacing: -1px;
+  cursor: grab;
+  user-select: none;
+  transition: 0.15s;
+}
+.pw-eq-grip:hover { color: var(--brass); background: rgba(var(--brass-rgb), 0.08); }
+.pw-eq-row.is-eq-dragging {
+  position: relative;
+  z-index: 10;
+  pointer-events: none; /* so elementFromPoint sees the list underneath when moving between lists */
+  background: var(--panel);
+  border-radius: 10px;
+  box-shadow: 0 10px 26px -10px rgba(0, 0, 0, 0.65);
+}
+body.eq-reordering { cursor: grabbing; user-select: none; }
+body.eq-reordering .pw-eq-grip { cursor: grabbing; }
+.pw-eqlist__item { display: flex; flex-direction: column; align-items: stretch; gap: 5px; }
+.pw-eqlist__name { font-weight: 600; color: var(--ink); font-size: 13.5px; }
+.pw-eqlist__item .eq-render { min-width: 0; }
+
+/* Floating math keyboard: a movable panel (drag its toolbar), not a
+   full-width dock. Position rides the CSS vars set by the drag in view.js.
+   Frosted-glass treatment (blur + translucent panel, --keyboard-background
+   below) matches .sidebar's own blur — one floating chrome language across
+   the app — plus a thin brass top edge as a small identity touch. */
+.ML__keyboard .MLK__backdrop {
+  left: auto !important;
+  top: auto !important;
+  right: var(--atlas-kb-right, 26px) !important;
+  bottom: var(--atlas-kb-bottom, 26px) !important;
+  width: min(720px, 94vw) !important;
+  border: 1px solid var(--line-2);
+  border-top: 2px solid rgba(var(--brass-rgb), 0.4);
+  border-radius: 16px;
+  overflow: hidden;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  box-shadow: 0 30px 80px -24px rgba(0, 0, 0, 0.75);
+}
+.ML__keyboard .MLK__toolbar { cursor: grab; border-bottom: 1px solid var(--line); }
+
+/* MathLive ships its own palette; these are the hooks it exposes, so the
+   equation keyboard belongs to the colour scheme like everything else. */
+.ML__keyboard {
+  --keyboard-background: color-mix(in srgb, var(--panel) 90%, transparent);
+  --keyboard-text: var(--ink);
+  --keyboard-text-active: var(--on-accent);
+  --keyboard-accent-color: var(--brass);
+  --keycap-background: rgba(var(--ink-rgb), 0.05);
+  --keycap-background-hover: rgba(var(--ink-rgb), 0.11);
+  --keycap-background-active: var(--brass);
+  --keycap-background-pressed: var(--brass);
+  --keycap-text: var(--ink);
+  --keycap-text-active: var(--on-accent);
+  --keycap-text-hover: var(--ink);
+  --keycap-text-pressed: var(--on-accent);
+  --keycap-secondary-background: rgba(var(--ink-rgb), 0.03);
+  --keycap-secondary-background-hover: rgba(var(--ink-rgb), 0.09);
+  --keycap-secondary-text: var(--ink-dim);
+  --keycap-border: var(--line-2);
+  --keycap-border-bottom: var(--line-2);
+  --keycap-shift-color: var(--brass);
+  --keyboard-toolbar-text: var(--ink-dim);
+  --keyboard-toolbar-text-active: var(--brass);
+  --keyboard-toolbar-background-hover: rgba(var(--ink-rgb), 0.07);
+}
+/* Per-field ☰ menu / keyboard-toggle icons are decluttered away (Chancellor:
+   "put them in the corner ... instead of the menu and math keyboard in
+   every text box") — one keyboard toggle now lives by Customize
+   (renderer.js) and drives every field via its focus/blur wiring there; the
+   field's own ☰ menu (trimmed of font/color/mode — see tuneMathFields in
+   view.js) stays reachable by right-click, MathLive's other built-in
+   trigger for the same menu. */
+math-field::part(menu-toggle), math-field::part(virtual-keyboard-toggle), .ML__virtual-keyboard-toggle { display: none; }
+math-field { --caret-color: var(--brass); --selection-background-color: rgba(var(--brass-rgb), 0.22); --contains-highlight-background-color: rgba(var(--brass-rgb), 0.12); }
+
+/* ---- gym plugin ----------------------------------------------------------- */
+
+.gym-head {
+  margin: 0 0 10px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.gym-big { font-family: "Instrument Serif", serif; font-size: 26px; color: var(--ink); line-height: 1.15; }
+.gym-big--num { font-size: 44px; color: var(--brass); }
+.gym-sub { margin: 6px 0 0; font-size: 12px; color: var(--ink-dim); }
+.gym-empty { margin: 4px 0 0; font-size: 12.5px; line-height: 1.5; color: var(--ink-faint); }
+.gym-group {
+  margin: 18px 0 8px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.gym-target {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 10px;
+  color: var(--ink-dim);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 1px 7px;
+  vertical-align: 2px;
+}
+.gym-add-row .gym-target-in { flex: 0 0 74px; }
+.gym-uni {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  color: var(--signal);
+  border: 1px solid rgba(var(--signal-rgb), 0.4);
+  border-radius: 999px;
+  padding: 1px 6px;
+  vertical-align: 2px;
+}
+
+/* exercise list */
+.gym-ex-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 11px;
+  margin-bottom: 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.gym-ex-row:hover { border-color: rgba(var(--brass-rgb), 0.45); background: rgba(var(--brass-rgb), 0.05); }
+.gym-ex-name { font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.gym-ex-idx { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--brass); }
+
+/* current workout + logging */
+.gym-exercise { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--line); }
+.gym-ex-title { margin: 0 0 7px; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.gym-log-row { display: flex; align-items: center; gap: 7px; margin-bottom: 6px; }
+/* The side reads as a full word ABOVE its input row (was a bare L/R chip beside
+   the weight field, which looked like part of the input). */
+.gym-side {
+  margin: 8px 0 3px;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--signal);
+}
+.gym-chips { flex: 1; min-width: 0; font-size: 12.5px; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gym-chips--none { color: var(--ink-faint); font-style: italic; }
+.gym-log-row .gym-w { flex: 0 0 64px; padding: 6px 8px; font-size: 12.5px; }
+.gym-log-row .gym-r { flex: 0 0 58px; padding: 6px 8px; font-size: 12.5px; }
+.gym-btn {
+  flex: none;
+  padding: 6px 12px;
+  border: 1px solid rgba(var(--brass-rgb), 0.5);
+  border-radius: 8px;
+  background: rgba(var(--brass-rgb), 0.1);
+  color: var(--brass);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: 0.15s;
+}
+.gym-btn:hover { background: rgba(var(--brass-rgb), 0.2); }
+.gym-btn--sm { padding: 3px 10px; font-size: 11px; }
+.gym-btn--ghost { border-color: var(--line-2); background: transparent; color: var(--ink-dim); }
+.gym-btn--ghost:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.05); }
+
+/* Set logger (weight | reps | ×) + set-history rows (date | small chart).
+   Class names coordinate with the gym JS agent's markup; ponytail: if it emits
+   other names only these blocks need renaming. Inputs reuse .pw-field. */
+.gym-sets { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.gym-set-row { display: flex; align-items: center; gap: 8px; }
+.gym-set-row .pw-field, .gym-set-row .gym-w, .gym-set-row .gym-r { flex: 0 0 72px; padding: 6px 8px; font-size: 12.5px; }
+.gym-set-row__lbl { flex: none; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-faint); }
+.gym-set-row .pw-item-remove, .gym-set-row .pw-delete, .gym-set-row .gym-set-x { margin-left: auto; }
+.gym-hist-row { display: flex; align-items: center; gap: 12px; padding: 6px 0; border-bottom: 1px dashed var(--line); }
+.gym-hist-row:last-child { border-bottom: none; }
+.gym-hist-row__date { flex: 0 0 96px; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-dim); }
+.gym-hist-row__chart { flex: 1; min-width: 0; }
+.btn-gym-complete {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 10px 18px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--brass), var(--brass-deep));
+  color: #1c1305;
+  font-family: "Hanken Grotesk", system-ui, sans-serif;
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter 0.15s;
+}
+.btn-gym-complete:hover { filter: brightness(1.08); }
+.pwidget--gymscoregraph { display: flex; flex-direction: column; }
+.pwidget--gymscoregraph .chart-mount { flex: 1 1 auto; min-height: 200px; }
+
+/* exercise modal */
+.modal--gym { max-width: 860px; }
+.gym-modal-chart { position: relative; height: 200px; margin-bottom: 4px; }
+.gym-modal-chart .chart { position: static; width: 100%; height: 200px; }
+.gym-history { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.gym-history td { padding: 6px 10px; border-top: 1px solid var(--line); color: var(--ink-dim); }
+.gym-history td:first-child { font-family: "IBM Plex Mono", monospace; font-size: 11px; white-space: nowrap; color: var(--ink-faint); }
+.gym-edit { display: flex; flex-direction: column; gap: 9px; }
+.gym-check { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--ink-dim); white-space: nowrap; }
+/* Custom-drawn checkbox — the native control renders white and ignores the
+   theme. Brass fill + dark check when on, subtle panel tone when off. */
+.gym-check input[type="checkbox"], .fin-ex-check {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin: 0;
+  position: relative;
+  border: 1px solid var(--line-2);
+  border-radius: 5px;
+  background: rgba(var(--ink-rgb), 0.04);
+  cursor: pointer;
+  transition: 0.15s;
+}
+.gym-check input[type="checkbox"]:hover, .fin-ex-check:hover { border-color: rgba(var(--brass-rgb), 0.5); }
+.gym-check input[type="checkbox"]:checked, .fin-ex-check:checked {
+  background: linear-gradient(180deg, var(--brass), var(--brass-deep));
+  border-color: var(--brass-deep);
+}
+.gym-check input[type="checkbox"]:checked::after, .fin-ex-check:checked::after {
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: 1.5px;
+  width: 4px;
+  height: 8px;
+  border: solid #1c1305;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.gym-edit-actions { display: flex; justify-content: space-between; margin-top: 4px; }
+
+/* gym settings tab */
+.gym-settings .set-row { margin-bottom: 8px; }
+.gym-settings select.pw-field { width: auto; min-width: 220px; }
+.gym-add-row { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
+.gym-add-row .pw-field { flex: 1; min-width: 0; }
+.gym-add-row select.pw-field { flex: 1; }
+.gym-workout-block {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(var(--ink-rgb), 0.02);
+}
+.gym-workout-block .gym-wk-name { font-weight: 600; }
+.gym-ex-edit { padding-left: 14px; }
+.gym-cycle-tools { display: flex; gap: 5px; }
+
+/* ---- motion ------------------------------------------------------------- */
+
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes pop { from { opacity: 0; transform: translateY(10px) scale(0.98); } to { opacity: 1; transform: none; } }
+
+/* Entrance animations play once on load, then are disabled so re-renders
+   (navigating) don't replay them everywhere. */
+html.ready .nav__item,
+html.ready .nav__head,
+html.ready .page,
+html.ready .empty { animation: none !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* ---- email plugin ------------------------------------------------------- */
+
+html[data-page="email"] .content { padding: 0; overflow: hidden; display: flex; }
+
+.mail { display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; }
+
+.mail-top {
+  display: flex; align-items: center; gap: 10px;
+  padding: 12px 18px; border-bottom: 1px solid var(--line); flex: none;
+}
+.mail-top__folder { font-family: "Instrument Serif", serif; font-size: 23px; letter-spacing: 0.01em; }
+.mail-top__addr { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-faint); }
+.mail-row__acct { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--brass); background: color-mix(in srgb, var(--brass) 14%, transparent); border-radius: 5px; padding: 1px 5px; flex: none; max-width: 9ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-compose__field.mc-from { color: var(--ink-dim); }
+
+.mail-iconbtn {
+  background: none; border: none; color: var(--ink-dim); border-radius: 8px;
+  width: 30px; height: 30px; display: grid; place-items: center; cursor: pointer; padding: 0; flex: none;
+}
+.mail-iconbtn:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.07); }
+.mail-iconbtn svg { width: 16px; height: 16px; }
+.mail-iconbtn.is-on { color: var(--brass); }
+
+.mail-btn {
+  font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  padding: 6px 13px; border-radius: 9px; border: 1px solid rgba(var(--brass-rgb), 0.45);
+  background: rgba(var(--brass-rgb), 0.13); color: var(--brass); text-decoration: none; display: inline-block;
+}
+.mail-btn:hover { background: rgba(var(--brass-rgb), 0.22); }
+.mail-btn:disabled { opacity: 0.55; cursor: default; }
+.mail-btn--primary { background: linear-gradient(180deg, var(--brass), var(--brass-deep)); color: var(--on-accent); border-color: transparent; }
+.mail-btn--primary:hover { filter: brightness(1.07); background: linear-gradient(180deg, var(--brass), var(--brass-deep)); }
+.mail-btn--ghost { border-color: var(--line-2); background: transparent; color: var(--ink-dim); }
+.mail-btn--ghost:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.05); }
+.mail-btn--ghost.is-on { color: var(--brass); border-color: rgba(var(--brass-rgb), 0.45); }
+
+.mail-body { display: flex; flex: 1; min-height: 0; }
+
+/* folder navigator (collapsible) */
+.mail-nav { width: 196px; flex: 0 0 196px; border-right: 1px solid var(--line); padding: 12px 10px; overflow-y: auto; }
+.mail-body.nav-hidden .mail-nav { display: none; }
+.mail-folder {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: none; border: none; color: var(--ink-dim); font: inherit; font-size: 13.5px;
+  padding: 7px 11px; border-radius: 9px; cursor: pointer;
+}
+.mail-folder:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.05); }
+.mail-folder.is-active { color: var(--brass); background: rgba(var(--brass-rgb), 0.1); }
+.mail-folder svg { width: 15px; height: 15px; flex: none; }
+.mail-folder span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-nav__head {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0.14em;
+  text-transform: uppercase; color: var(--ink-faint); margin: 16px 11px 6px;
+}
+/* one account heading per connected address, its folders indented beneath */
+.mail-nav__acct {
+  display: block; width: 100%; text-align: left; background: none; border: none; cursor: pointer;
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.04em;
+  color: var(--ink-faint); padding: 7px 11px 5px; margin-top: 10px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  list-style: none; /* the default disclosure triangle, replaced by the caret below */
+}
+.mail-nav__acct::-webkit-details-marker { display: none; }
+.mail-nav__acct::before {
+  content: "›"; display: inline-block; width: 9px; margin-right: 5px;
+  transition: transform 0.12s ease; transform-origin: 45% 50%;
+}
+.mail-nav__grp[open] > .mail-nav__acct::before { transform: rotate(90deg); }
+.mail-nav__grp:first-child > .mail-nav__acct { margin-top: 0; }
+.mail-nav__acct:hover { color: var(--ink); }
+.mail-nav__acct.is-active { color: var(--brass); }
+.mail-nav__sub { padding-left: 9px; border-left: 1px solid var(--line); margin: 0 0 2px 12px; }
+.mail-nav__sub .mail-nav__head { margin: 9px 9px 4px; }
+
+/* colour scheme picker (Settings) */
+.set-theme { display: flex; flex-direction: column; gap: 12px; align-items: flex-end; }
+.set-theme__row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }
+/* One size for every scheme: fixed column width AND a pinned row height (not
+   left to content), plus grid-auto-rows so a trailing partial row still lines
+   up instead of dangling at a different height. Custom is the 9th tile in the
+   same grid as the 8 presets, not a one-off appended below it. */
+.set-theme__presets { display: grid; grid-template-columns: repeat(3, 132px); grid-auto-rows: 44px; gap: 8px; }
+.set-theme__preset {
+  display: flex; align-items: center; gap: 6px; cursor: pointer; min-width: 0;
+  box-sizing: border-box; height: 44px;
+  background: none; /* without this a <button> keeps the platform's grey chrome */
+  padding: 7px 10px 7px 9px; border-radius: 10px;
+  border: 1px solid var(--line-2); color: var(--ink-dim);
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.03em;
+}
+.set-theme__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.set-theme__preset:hover { border-color: var(--ink-faint); color: var(--ink); }
+.set-theme__preset.is-on { border-color: var(--brass); color: var(--ink); }
+.set-theme__chip {
+  display: inline-flex; align-items: center; gap: 3px; flex: none;
+  padding: 4px 5px; border-radius: 6px; border: 1px solid var(--line-2);
+}
+.set-theme__dot { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.set-theme__dot--sm { width: 8px; height: 8px; opacity: 0.8; }
+/* custom scheme editor (modal) */
+.tm { display: flex; flex-direction: column; gap: 16px; }
+.tm__slots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.tm__slot {
+  display: flex; align-items: center; gap: 8px; cursor: pointer; text-align: left;
+  background: none; border: 1px solid var(--line-2); border-radius: 10px; padding: 7px 10px;
+  color: var(--ink-dim); font-family: inherit; font-size: 12.5px;
+}
+.tm__slot:hover { border-color: var(--ink-faint); color: var(--ink); }
+.tm__slot.is-on { border-color: var(--brass); color: var(--ink); background: rgba(var(--brass-rgb), 0.07); }
+.tm__chip { width: 18px; height: 18px; border-radius: 6px; flex: none; border: 1px solid var(--line-2); }
+.tm__slotname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tm__slothex { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-faint); }
+.tm__pick { display: flex; gap: 20px; align-items: flex-start; }
+.tm__wheel { border-radius: 50%; cursor: crosshair; touch-action: none; flex: none; }
+.tm__pick > :first-child { position: relative; }
+.tm__dot {
+  position: absolute; width: 14px; height: 14px; border-radius: 50%; pointer-events: none;
+  transform: translate(-50%, -50%); border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+}
+.tm__controls { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.tm__slider { display: flex; align-items: center; gap: 8px; font-size: 11px; color: var(--ink-faint); }
+.tm__slider input { flex: 1; accent-color: var(--brass); }
+/* A range input's UA-default width (129px in WebKit) is its flex min-content
+   floor while min-width stays "auto", so flex:1 alone can't shrink it — on the
+   phone-width modal the wheel + "Shade"/"Tint" labels leave the slider well
+   under 129px and it ran ~7px past the screen edge. min-width:0 lets it
+   actually shrink to the space left over, same as .tm__controls already does. */
+body.is-mobile .tm__slider input { min-width: 0; }
+.tm__inputs { display: flex; gap: 8px; align-items: center; }
+.tm__inputs input[type="color"] {
+  width: 40px; height: 32px; padding: 0; cursor: pointer;
+  background: none; border: 1px solid var(--line-2); border-radius: 8px; flex: none;
+}
+.tm__inputs .pw-field { flex: 1; min-width: 0; font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+.tm__note { margin: 0; font-size: 11.5px; color: var(--ink-faint); }
+.tm__note.is-bad { color: var(--neg); }
+.tm__foot { display: flex; align-items: center; gap: 10px; }
+.tm__hint { flex: 1; font-size: 11.5px; color: var(--ink-faint); }
+.set-theme__modes { display: inline-flex; border: 1px solid var(--line-2); border-radius: 9px; overflow: hidden; }
+.set-theme__mode {
+  background: none; border: none; cursor: pointer; padding: 6px 14px;
+  font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.05em;
+  color: var(--ink-faint);
+}
+.set-theme__mode:hover { color: var(--ink); }
+.set-theme__mode.is-on { background: rgba(var(--brass-rgb), 0.14); color: var(--brass); }
+.set-theme__logo { border-radius: 10px; display: block; }
+
+/* bulk-selection bar — appears under the header once a row is ticked */
+.mail-selbar {
+  display: flex; align-items: center; gap: 8px; position: relative; flex: none;
+  padding: 7px 14px; border-bottom: 1px solid var(--line);
+  background: rgba(var(--brass-rgb), 0.06);
+}
+.mail-selbar[hidden] { display: none; }
+.mail-selbar__n {
+  font-family: "IBM Plex Mono", monospace; font-size: 11.5px;
+  letter-spacing: 0.04em; color: var(--brass); margin-right: 2px;
+}
+.mail-selbar .mail-btn { display: inline-flex; align-items: center; gap: 5px; }
+.mail-selbar .mail-btn svg { width: 13px; height: 13px; }
+.mail-row__check {
+  flex: 0 0 auto; width: 14px; height: 14px; margin: 0 3px 0 0;
+  accent-color: var(--brass); cursor: pointer;
+}
+.mail-row.is-sel { background: rgba(var(--brass-rgb), 0.09); }
+
+/* thread list */
+.mail-list { flex: 0 0 42%; min-width: 230px; overflow-y: auto; }
+.mail-list__empty { color: var(--ink-faint); font-size: 13px; padding: 26px 18px; margin: 0; }
+.mail-row { padding: 11px 14px; border-bottom: 1px solid var(--line); cursor: pointer; position: relative; }
+.mail-row:hover { background: rgba(var(--ink-rgb), 0.04); }
+.mail-row.is-open { background: rgba(var(--brass-rgb), 0.07); box-shadow: inset 2px 0 0 var(--brass); }
+.mail-row__top { display: flex; gap: 8px; align-items: baseline; }
+.mail-row__from {
+  font-size: 13.5px; font-weight: 500; color: var(--ink-dim);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.mail-row__date { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-faint); flex: none; }
+.mail-row__subj { font-size: 13px; margin: 3px 0 2px; color: var(--ink); display: flex; align-items: center; gap: 6px; min-width: 0; }
+.mail-row__subjtext { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-row__count { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); border: 1px solid var(--line-2); border-radius: 99px; padding: 0 6px; flex: none; }
+.mail-row.is-unread .mail-row__from, .mail-row.is-unread .mail-row__subjtext { color: var(--ink); font-weight: 700; }
+.mail-row__snip { font-size: 12px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-glyph { display: inline-flex; flex: none; }
+.mail-glyph svg { width: 12px; height: 12px; }
+.mail-glyph--pin { color: var(--brass); }
+.mail-glyph--star { color: var(--brass); }
+.mail-row__acts {
+  position: absolute; right: 10px; bottom: 6px; display: none; gap: 1px;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 9px; padding: 1px;
+}
+.mail-row:hover .mail-row__acts { display: flex; }
+.mail-row__acts .mail-iconbtn { width: 26px; height: 26px; }
+.mail-more { display: block; margin: 12px auto; }
+
+/* split bar between list and viewer */
+.mail-split { flex: 0 0 9px; cursor: col-resize; position: relative; }
+.mail-split::after { content: ''; position: absolute; inset: 0 4px; background: var(--line); transition: background 0.15s ease; }
+.mail-split:hover::after, .is-mail-splitting .mail-split::after { background: var(--brass); }
+.is-mail-splitting { user-select: none; cursor: col-resize; }
+.is-mail-splitting .mail-frame { pointer-events: none; }
+
+/* viewer */
+.mail-view { flex: 1 1 0; min-width: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.mail-view__empty { margin: auto; text-align: center; color: var(--ink-faint); font-size: 13px; }
+.mail-view__empty svg { width: 40px; height: 40px; opacity: 0.5; }
+.mail-view__bar {
+  display: flex; gap: 7px; flex-wrap: wrap; align-items: center;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); flex: none;
+  position: sticky; top: 0; background: var(--bg); z-index: 2;
+}
+/* move-to-folder popover, anchored to the (positioned) action bar */
+.mail-movemenu {
+  position: absolute; top: calc(100% - 4px); left: 16px; z-index: 5; width: 260px; max-width: calc(100% - 32px);
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 12px;
+  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.6); padding: 6px; overflow: hidden;
+}
+.mail-movemenu__head { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); padding: 6px 8px 4px; }
+/* block, not flex — the label's text runs ("Always file mail from", the <b>
+   address, "here") must flow as normal inline text that wraps at word
+   boundaries. As flex items the <b> got squeezed to one glyph per line. */
+.mail-movemenu__sender {
+  display: block; font-size: 12px; color: var(--ink-dim);
+  padding: 6px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--line); cursor: pointer;
+}
+.mail-movemenu__sender input { float: left; margin: 2px 7px 0 0; }
+.mail-movemenu__sender b { color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.mail-movemenu__list { max-height: 260px; overflow-y: auto; }
+.mail-movemenu__item {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+  font: inherit; font-size: 13px; color: var(--ink); background: none; border: none; cursor: pointer;
+  padding: 7px 8px; border-radius: 8px;
+}
+.mail-movemenu__item svg { width: 15px; height: 15px; flex: none; color: var(--ink-faint); }
+.mail-movemenu__item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-movemenu__item:hover { background: rgba(var(--ink-rgb), 0.06); }
+.mail-movemenu__new { color: var(--brass); }
+.mail-view__subject { font-family: "Instrument Serif", serif; font-size: 27px; font-weight: 400; margin: 16px 18px 4px; }
+.mail-msg { border: 1px solid var(--line); border-radius: 13px; margin: 10px 18px; overflow: hidden; background: var(--panel); flex: none; }
+.mail-msg:last-child { margin-bottom: 20px; }
+.mail-msg__head {
+  padding: 10px 14px; font-size: 12.5px; color: var(--ink-dim);
+  border-bottom: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline;
+}
+.mail-msg__from { color: var(--ink); font-weight: 600; }
+.mail-msg__meta { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-msg__date { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-faint); }
+.mail-frame { width: 100%; border: 0; height: 120px; background: #fff; display: block; }
+
+/* compose */
+.mail-compose {
+  position: fixed; right: 26px; bottom: 26px; z-index: 70;
+  width: min(640px, calc(100vw - 56px)); max-height: calc(100vh - 60px);
+  display: flex; flex-direction: column;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 15px;
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.55);
+}
+.mail-compose__head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 10px 8px 16px; font-family: "IBM Plex Mono", monospace; font-size: 11px;
+  letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-dim);
+  border-bottom: 1px solid var(--line);
+}
+.mail-compose__field {
+  background: none; border: none; border-bottom: 1px solid var(--line);
+  color: var(--ink); font: inherit; font-size: 13.5px; padding: 9px 16px; outline: none;
+}
+.mail-compose__field:focus { border-bottom-color: rgba(var(--brass-rgb), 0.5); }
+.mail-compose__field::placeholder { color: var(--ink-faint); }
+.mail-compose__body {
+  min-height: 170px; flex: 1; overflow-y: auto; outline: none;
+  padding: 13px 16px; font-size: 14px; line-height: 1.55;
+}
+.mail-compose__body a { color: var(--brass); }
+.mail-compose__tools { display: flex; gap: 2px; padding: 5px 10px; border-top: 1px solid var(--line); }
+.mail-tool {
+  width: 29px; height: 27px; display: grid; place-items: center;
+  background: none; border: none; border-radius: 7px; color: var(--ink-dim);
+  font: inherit; font-size: 13px; cursor: pointer;
+}
+.mail-tool:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.07); }
+.mail-compose__foot { display: flex; gap: 8px; align-items: center; padding: 10px 12px; border-top: 1px solid var(--line); }
+.mail-compose__status { font-size: 12px; color: var(--ink-faint); }
+.mail-compose__discard { margin-left: auto; }
+
+/* connect card */
+.mail-connect { margin: auto; text-align: center; max-width: 430px; padding: 40px 24px; }
+.mail-connect__mark { color: var(--brass); opacity: 0.85; }
+.mail-connect__mark svg { width: 46px; height: 46px; }
+.mail-connect__title { font-family: "Instrument Serif", serif; font-size: 30px; font-weight: 400; margin: 14px 0 8px; }
+.mail-connect__text { font-size: 13.5px; color: var(--ink-dim); line-height: 1.6; margin: 0 0 20px; }
+.mail-connect__text a { color: var(--brass); }
+.mail-connect__err { font-size: 12.5px; color: var(--neg); margin-top: 14px; min-height: 1em; }
+
+/* toast */
+.mail-toast {
+  position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); z-index: 80;
+  background: #241318; border: 1px solid rgba(255, 130, 130, 0.35); color: #f0b9b9;
+  font-size: 12.5px; padding: 9px 16px; border-radius: 10px; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+}
+.mail-toast--ok { background: #16201c; border-color: rgba(var(--signal-rgb), 0.35); color: var(--signal); }
+
+/* settings row */
+.set-gmail { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.set-gmail__acct { display: flex; gap: 8px; align-items: center; flex-basis: 100%; justify-content: flex-end; }
+.set-data { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.set-data__status { flex-basis: 100%; text-align: right; color: var(--signal); }
+.set-gmail__id { width: 300px; }
+.set-gmail__who { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-dim); }
+
+/* settings → accounts → AI connections */
+.set-row--ai { align-items: flex-start; flex-wrap: wrap; }
+.ai-conn { display: flex; flex-direction: column; gap: 8px; flex: 1 1 340px; max-width: 420px; }
+.ai-conn__row { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.ai-conn__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ai-conn__name { font-size: 13px; font-weight: 600; color: var(--ink); }
+.ai-conn__status { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--signal); }
+.ai-conn__status--off { color: var(--ink-faint); }
+.ai-conn__actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ai-conn__field { flex: 1; min-width: 0; }
+.ai-conn__prefs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 10px; padding-top: 2px; }
+.ai-conn__prefs.is-disabled { opacity: 0.5; }
+.ai-conn__pref { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--ink-faint); }
+
+/* settings → plugins */
+.plug-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 16px; }
+.plug-head .set-row__sub { max-width: 62ch; }
+
+/* Plugins as a grid of cards that fits the page. auto-fill + minmax means the
+   column count follows the window instead of a breakpoint guess. */
+.page--plugins { display: flex; flex-direction: column; min-height: 0; }
+.plug-grid {
+  display: grid; gap: 10px; align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+}
+.plug-card {
+  display: flex; flex-direction: column; gap: 6px; text-align: left; cursor: pointer;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 13px;
+  padding: 13px 14px 11px; font-family: inherit; color: var(--ink-dim);
+  transition: border-color 0.15s, background 0.15s, transform 0.15s;
+}
+.plug-card:hover { border-color: var(--ink-faint); transform: translateY(-1px); box-shadow: 0 10px 24px -16px rgba(0, 0, 0, 0.55); }
+.plug-card.is-on { border-color: rgba(var(--brass-rgb), 0.45); background: rgba(var(--brass-rgb), 0.06); }
+.plug-card__top { display: flex; align-items: center; gap: 10px; }
+.plug-card__name { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--ink); }
+.plug-card__desc { font-size: 12px; line-height: 1.45; color: var(--ink-faint); }
+.plug-card__foot { display: flex; align-items: center; gap: 8px; margin-top: auto; padding-top: 4px; }
+.plug-card__foot:empty { display: none; }
+.plug-card__rm {
+  margin-left: auto; font-size: 11.5px; color: var(--ink-faint);
+  border-bottom: 1px solid transparent; cursor: pointer;
+}
+.plug-card__rm:hover { color: var(--neg); border-bottom-color: currentColor; }
+
+/* customize-mode stub for a disabled plugin's widget */
+.pwidget--off { opacity: 0.55; border-style: dashed; }
+.pwidget--off .pw-off__name { font-size: 13px; font-weight: 600; }
+.pwidget--off .pw-off__sub { margin-top: 2px; font-size: 11.5px; color: var(--ink-faint); }
+.plug-card .plug-badge { margin-left: 0; }
+.plug-badge {
+  font-family: "IBM Plex Mono", monospace; font-size: 10px; font-weight: 400;
+  border: 1px solid var(--line-2); border-radius: 99px; padding: 1px 7px;
+  color: var(--ink-faint); margin-left: 6px; vertical-align: 1px;
+}
+.plug-drop--card { margin: 0; padding: 16px 12px; justify-content: center; }
+.plug-drop {
+  margin: 14px 0 6px; padding: 22px 16px; text-align: center; cursor: pointer;
+  border: 1.5px dashed var(--line-2); border-radius: 12px; color: var(--ink-dim);
+  display: flex; flex-direction: column; gap: 3px; transition: 0.15s;
+}
+.plug-drop:hover, .plug-drop.is-over { border-color: var(--brass); color: var(--ink); background: rgba(var(--brass-rgb), 0.05); }
+.plug-drop__big { font-size: 13.5px; font-weight: 600; }
+.plug-drop__sub { font-size: 12px; color: var(--ink-faint); }
+.plug-status { text-align: right; color: var(--signal); min-height: 1em; }
+.plug-status.is-err { color: var(--neg); }
+
+/* ---- calendar plugin ------------------------------------------------------ */
+
+html[data-page="calendar"] .content { padding: 0; overflow: hidden; display: flex; }
+
+.cal { display: flex; flex-direction: column; flex: 1; min-width: 0; height: 100%; }
+.cal-top { display: flex; align-items: center; gap: 9px; padding: 12px 18px; border-bottom: 1px solid var(--line); flex: none; }
+.cal-top__label { font-family: "Instrument Serif", serif; font-size: 22px; margin: 0 6px; white-space: nowrap; }
+.cal-views { display: flex; gap: 2px; margin-left: auto; border: 1px solid var(--line-2); border-radius: 10px; padding: 2px; }
+.cal-view-pill {
+  font: inherit; font-size: 12px; font-weight: 600; color: var(--ink-dim);
+  background: none; border: none; border-radius: 8px; padding: 5px 12px; cursor: pointer;
+}
+.cal-view-pill:hover { color: var(--ink); }
+.cal-view-pill.is-active { color: var(--brass); background: rgba(var(--brass-rgb), 0.13); }
+
+.cal-body { display: flex; flex: 1; min-height: 0; }
+.cal-nav { width: 196px; flex: 0 0 196px; border-right: 1px solid var(--line); padding: 12px 12px; overflow-y: auto; }
+.cal-body.nav-hidden .cal-nav { display: none; }
+.cal-grid { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+
+/* calendar sources (enable/disable) */
+.cal-src { display: flex; align-items: center; gap: 9px; padding: 6px 6px; border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--ink-dim); }
+.cal-src:hover { background: rgba(var(--ink-rgb), 0.05); color: var(--ink); }
+.cal-src input { position: absolute; opacity: 0; pointer-events: none; }
+.cal-src__box { width: 14px; height: 14px; flex: none; border-radius: 4px; border: 1.5px solid var(--evc, var(--brass)); position: relative; }
+.cal-src input:checked + .cal-src__box { background: var(--evc, var(--brass)); }
+.cal-src input:checked + .cal-src__box::after {
+  content: ''; position: absolute; left: 3.5px; top: 0.5px; width: 4px; height: 8px;
+  border: solid var(--on-accent); border-width: 0 2px 2px 0; transform: rotate(42deg);
+}
+.cal-src__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* month view */
+.cal-month { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.cal-month__head { display: grid; grid-template-columns: repeat(7, 1fr); border-bottom: 1px solid var(--line); }
+.cal-month__head span {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--ink-faint); text-align: center; padding: 8px 0;
+}
+.cal-month__grid { display: grid; grid-template-columns: repeat(7, 1fr); grid-template-rows: repeat(6, 1fr); flex: 1; min-height: 0; }
+.cal-cell { border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 4px; min-width: 0; overflow: hidden; display: flex; flex-direction: column; gap: 2px; cursor: pointer; container-type: inline-size; }
+/* Narrow month cells (small viewport / phone): progressively shrink chrome so a
+   full month grid fits phone width instead of scrolling sideways. First drop the
+   trailing time, then tighten chip padding/font, then the day number — the title
+   (.cal-chip__t) already ellipsizes so it stays readable throughout. */
+@container (max-width: 118px) { .cal-chip__time { display: none; } }
+@container (max-width: 90px) {
+  .cal-cell { padding: 3px; }
+  .cal-chip { padding: 1px 4px; font-size: 10.5px; gap: 4px; }
+  .cal-chip::before { width: 5px; height: 5px; }
+  .cal-more { font-size: 9.5px; padding: 1px 4px; }
+}
+@container (max-width: 64px) {
+  .cal-cell { padding: 2px; gap: 1px; }
+  .cal-chip { padding: 1px 3px; font-size: 10px; gap: 3px; }
+  .cal-cell__num { width: 18px; height: 18px; font-size: 10.5px; }
+}
+.cal-cell:nth-child(7n) { border-right: none; }
+.cal-cell:hover { background: rgba(var(--ink-rgb), 0.025); }
+.cal-cell--other { background: color-mix(in srgb, var(--bg) 45%, transparent); }
+.cal-cell--other .cal-cell__num { color: var(--ink-faint); }
+.cal-cell__num {
+  font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink-dim);
+  background: none; border: none; cursor: pointer; align-self: flex-start;
+  width: 22px; height: 22px; border-radius: 99px; display: grid; place-items: center; padding: 0; flex: none;
+}
+.cal-cell__num:hover { background: rgba(var(--ink-rgb), 0.1); color: var(--ink); }
+.cal-cell--today .cal-cell__num { background: linear-gradient(180deg, var(--brass), var(--brass-deep)); color: var(--on-accent); font-weight: 700; }
+.cal-chip {
+  display: flex; align-items: center; gap: 5px; min-width: 0; text-align: left;
+  font: inherit; font-size: 11.5px; color: var(--ink); background: none; border: none;
+  border-radius: 6px; padding: 2px 5px; cursor: pointer; flex: none; overflow: hidden;
+}
+.cal-chip:hover { background: rgba(var(--ink-rgb), 0.08); }
+.cal-chip::before { content: ''; width: 7px; height: 7px; border-radius: 99px; background: var(--evc, var(--brass)); flex: none; }
+.cal-chip--fill { background: color-mix(in srgb, var(--evc, var(--brass)) 26%, transparent); }
+.cal-chip--fill:hover { background: color-mix(in srgb, var(--evc, var(--brass)) 38%, transparent); }
+.cal-chip--fill::before { display: none; }
+.cal-chip--rsvp { outline: 1px dashed var(--evc, var(--brass)); outline-offset: -1px; }
+/* time trails the title (margin-left:auto pins it to the right edge); the title
+   grows and truncates so the time stays visible instead of being pushed off. */
+.cal-chip__time { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); flex: none; margin-left: auto; padding-left: 4px; }
+.cal-chip__t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-more {
+  font: inherit; font-size: 10.5px; color: var(--ink-faint); background: none; border: none;
+  text-align: left; padding: 1px 5px; cursor: pointer; border-radius: 6px;
+}
+.cal-more:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.07); }
+
+/* week / day views */
+.cal-week { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.cal-week__heads, .cal-week__allday { display: flex; border-bottom: 1px solid var(--line); flex: none; }
+.cal-gutter { width: 58px; flex: 0 0 58px; font-family: "IBM Plex Mono", monospace; font-size: 9.5px; color: var(--ink-faint); text-align: right; padding-right: 8px; }
+.cal-week__allday .cal-gutter { padding-top: 4px; }
+.cal-colhead { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 7px; padding: 8px 10px; border-left: 1px solid var(--line); }
+.cal-colhead__num {
+  font-family: "Instrument Serif", serif; font-size: 21px; color: var(--ink);
+  background: none; border: none; cursor: pointer; padding: 0 4px; border-radius: 8px;
+}
+.cal-colhead__num:hover { background: rgba(var(--ink-rgb), 0.08); }
+.cal-colhead.is-today .cal-colhead__num { color: var(--brass); }
+.cal-colhead span { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
+.cal-allday-col { flex: 1; min-width: 0; border-left: 1px solid var(--line); padding: 3px 4px; display: flex; flex-direction: column; gap: 2px; min-height: 26px; }
+.cal-week__scroll { flex: 1; overflow-y: auto; min-height: 0; }
+.cal-week__grid { display: flex; min-height: 1056px; }
+.cal-gutter--hours { display: flex; flex-direction: column; }
+.cal-hour { height: 44px; flex: none; transform: translateY(-6px); }
+.cal-day-col {
+  flex: 1; min-width: 0; position: relative; border-left: 1px solid var(--line); cursor: pointer;
+  background: repeating-linear-gradient(to bottom, transparent 0 43px, var(--line) 43px 44px);
+  container-type: inline-size;
+}
+/* Narrow day columns (phone week view): shrink block chrome and floor the
+   timed-block height so short events stay a tappable ~30px tall. */
+@container (max-width: 90px) {
+  .cal-block { padding: 2px 4px; font-size: 10.5px; min-height: 30px; }
+  .cal-block__time { font-size: 8.5px; }
+}
+.cal-block {
+  position: absolute; overflow: hidden; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 1px; padding: 3px 7px;
+  font: inherit; font-size: 11.5px; color: var(--ink);
+  background: color-mix(in srgb, var(--evc, var(--brass)) 22%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--evc, var(--brass)) 45%, transparent);
+  border-left: 3px solid var(--evc, var(--brass)); border-radius: 7px;
+}
+.cal-block:hover { background: color-mix(in srgb, var(--evc, var(--brass)) 32%, var(--panel)); z-index: 3; }
+.cal-block__time { font-family: "IBM Plex Mono", monospace; font-size: 9.5px; color: var(--ink-dim); }
+.cal-block__t { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Short events (<= ~35px tall) can't stack time over title without clipping —
+   lay them out on one line (time, then the title ellipsizing) instead. */
+.cal-block--tight { flex-direction: row; align-items: baseline; gap: 4px; }
+.cal-block--tight .cal-block__t { min-width: 0; }
+.cal-now { position: absolute; left: 0; right: 0; height: 0; border-top: 2px solid var(--neg); z-index: 4; pointer-events: none; }
+.cal-now::before { content: ''; position: absolute; left: -1px; top: -5px; width: 8px; height: 8px; border-radius: 99px; background: var(--neg); }
+
+/* event panel + editor */
+.cal-overlay {
+  position: fixed; inset: 0; z-index: 90; display: grid; place-items: center;
+  background: rgba(5, 6, 10, 0.62); backdrop-filter: blur(3px);
+}
+.cal-panel {
+  width: min(560px, calc(100vw - 48px)); max-height: calc(100vh - 80px); overflow-y: auto;
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 16px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55); padding: 18px 20px;
+}
+.cal-panel__head { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+.cal-panel__dot { width: 11px; height: 11px; border-radius: 99px; background: var(--evc, var(--brass)); flex: none; }
+.cal-panel__title { font-family: "Instrument Serif", serif; font-size: 24px; font-weight: 400; margin: 0; flex: 1; min-width: 0; }
+.cal-panel__when { font-size: 13.5px; color: var(--ink); margin: 2px 0 0; }
+.cal-panel__rule { font-size: 12.5px; color: var(--brass); margin: 4px 0 0; }
+.cal-panel__cal { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); margin: 4px 0 10px; }
+.cal-field { display: flex; gap: 10px; font-size: 13px; color: var(--ink-dim); margin: 7px 0; align-items: baseline; }
+.cal-field__label { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); flex: none; }
+.cal-desc { white-space: normal; word-break: break-word; }
+.cal-desc :is(p, div, ul, ol) { margin: 0; }
+.cal-desc a { color: var(--brass); }
+.cal-desc img { max-width: 100%; height: auto; }
+.cal-guest { display: flex; align-items: center; gap: 7px; margin: 2px 0; }
+.cal-guest__dot { width: 8px; height: 8px; border-radius: 99px; flex: none; background: var(--ink-faint); }
+.cal-guest__dot--accepted { background: var(--signal); }
+.cal-guest__dot--declined { background: var(--neg); }
+.cal-guest__dot--tentative { background: var(--brass); }
+.cal-guest__st { font-size: 11px; color: var(--ink-faint); }
+.cal-rsvp { display: flex; gap: 7px; align-items: center; margin: 12px 0 2px; }
+.cal-panel__foot { display: flex; gap: 8px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+
+.cal-ed-title { width: 100%; font-size: 17px; margin: 6px 0 12px; }
+.cal-ed-grid { display: grid; grid-template-columns: 84px 1fr; gap: 9px 12px; align-items: center; }
+.cal-ed-grid .pw-field { width: 100%; }
+.cal-ed-grid textarea.pw-field { resize: vertical; }
+.cal-ed-when { display: flex; gap: 8px; }
+.cal-ed-when .pw-field { flex: 1; }
+.cal-time { flex: 0 0 108px !important; }
+.cal-allday-check { margin: 0; }
+.cal-dows { display: flex; gap: 5px; }
+.cal-dow input { position: absolute; opacity: 0; pointer-events: none; }
+.cal-dow span {
+  display: grid; place-items: center; width: 28px; height: 28px; border-radius: 99px;
+  font-size: 11.5px; font-weight: 600; color: var(--ink-dim);
+  border: 1px solid var(--line-2); cursor: pointer;
+}
+.cal-dow input:checked + span { background: linear-gradient(180deg, var(--brass), var(--brass-deep)); color: var(--on-accent); border-color: transparent; }
+input[type="date"].pw-field, input[type="time"].pw-field { color-scheme: dark; }
+
+/* dashboard widgets */
+.cal-wnote { font-size: 12.5px; color: var(--ink-faint); margin: 6px 0; }
+.cal-aghead { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); margin: 9px 0 3px; }
+.cal-agrow { display: flex; align-items: center; gap: 8px; padding: 3px 0; font-size: 13px; min-width: 0; }
+.cal-agdot { width: 8px; height: 8px; border-radius: 99px; background: var(--evc, var(--brass)); flex: none; }
+.cal-agtime { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-faint); flex: 0 0 62px; }
+.cal-agtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-mini { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; margin-top: 4px; }
+.cal-mini__head { font-family: "IBM Plex Mono", monospace; font-size: 9px; color: var(--ink-faint); text-align: center; padding: 2px 0; }
+.cal-mini__cell { display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 3px 0 2px; border-radius: 7px; font-size: 11px; color: var(--ink-dim); }
+.cal-mini__cell.is-other { color: var(--ink-faint); opacity: 0.55; }
+.cal-mini__cell.is-today { background: rgba(var(--brass-rgb), 0.14); color: var(--brass); font-weight: 700; }
+.cal-mini__dots { display: flex; gap: 2px; height: 4px; }
+.cal-mini__dots i { width: 4px; height: 4px; border-radius: 99px; background: var(--evc, var(--brass)); }
+
+/* ---- canvas plugin -------------------------------------------------------- */
+
+.cv-mount { min-width: 0; }
+.cv-mount .cal-wnote a, .cv-settings .cal-wnote a { color: var(--brass); }
+
+/* gradebook */
+.cv-pills { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 9px; }
+.cv-pill {
+  font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  color: var(--ink-dim); background: none; border: 1px solid var(--line-2);
+  border-radius: 99px; padding: 3px 11px;
+}
+.cv-pill:hover { color: var(--ink); }
+.cv-pill.is-active { color: var(--ink); border-color: var(--cvc, var(--brass)); background: color-mix(in srgb, var(--cvc, var(--brass)) 16%, transparent); }
+.cv-course-line { display: flex; align-items: baseline; gap: 10px; margin: 2px 0 8px; }
+.cv-cname { font-size: 13px; color: var(--ink-dim); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-cgrade { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--brass); flex: none; }
+.cv-group { margin: 10px 0 4px; }
+.cv-group__head {
+  display: flex; align-items: baseline; gap: 9px; padding-bottom: 4px; margin-bottom: 2px;
+  border-bottom: 1px solid var(--line);
+}
+.cv-group__name { font-weight: 700; font-size: 13px; }
+.cv-weight {
+  font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--brass);
+  border: 1px solid rgba(var(--brass-rgb), 0.4); border-radius: 99px; padding: 0 7px;
+}
+.cv-gavg { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); }
+
+/* shared rows */
+.cv-arow { display: flex; align-items: center; gap: 8px; padding: 4px 0; font-size: 13px; min-width: 0; }
+/* clickable assignment rows (gradebook / upcoming / to-do) → open a modal */
+.cv-arow--btn { font: inherit; font-size: 13px; color: var(--ink); background: none; border: none; cursor: pointer; text-align: left; width: 100%; border-radius: 8px; padding: 5px 6px; }
+.cv-arow--btn:hover { background: rgba(var(--ink-rgb), 0.05); }
+.cv-aname { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-score { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--ink); flex: none; }
+.cv-pct { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); flex: none; width: 34px; text-align: right; }
+.cv-dim { color: var(--ink-faint); }
+.cv-trend { font-family: "IBM Plex Mono", monospace; font-size: 9.5px; flex: none; border-radius: 99px; padding: 1px 6px; }
+.cv-up { color: var(--signal); background: rgba(var(--signal-rgb), 0.12); }
+.cv-down { color: var(--neg); background: rgba(var(--neg-rgb), 0.12); }
+.cv-ctag {
+  font-family: "IBM Plex Mono", monospace; font-size: 9.5px; flex: none; max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; justify-self: start;
+  color: var(--ink); background: color-mix(in srgb, var(--cvc, var(--brass)) 22%, transparent);
+  border-radius: 6px; padding: 1px 7px;
+}
+
+/* rows that lead with a class label share one label column (subgrid), so all
+   assignment names start at the same x regardless of label width */
+/* The course tag shares the flexible space with the name (1:3) instead of
+   taking max-content — a long tag ("Mechanics of Materials") no longer starves
+   the name column to zero at narrow widget widths; the tag ellipsizes first. */
+.cv-rows { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 3fr) max-content max-content; column-gap: 8px; min-width: 0; overflow: hidden; container-type: inline-size; }
+/* Very narrow widget (zoomed-in dashboard): a wide "today · 3:10 AM" due can
+   still crush the name on one line — reflow so the name takes its own full line
+   and the tag + due sit together above it. */
+@container (max-width: 240px) {
+  .cv-rows > .cv-arow, .cv-rows > .cv-ann { grid-template-columns: none; display: flex; flex-wrap: wrap; gap: 1px 6px; align-items: baseline; }
+  .cv-rows .cv-aname { order: 2; flex: 1 1 100%; }
+  .cv-rows .cv-due { margin-left: auto; }
+}
+/* min-width:0 — each row is a grid item, whose default min-width:auto = the
+   name's min-content (full string, since it's nowrap). Without this the row
+   refuses to shrink and the name spills over the date and off the card. */
+.cv-rows > .cv-arow, .cv-rows > .cv-ann { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; column-gap: 8px; align-items: center; min-width: 0; }
+/* stretch (not start) so the name fills its 1fr track — a content-sized
+   (justify-self:start) item ignores the track width, so overflow/ellipsis has
+   nothing to clip against and the name runs over the date. */
+.cv-rows .cv-aname { text-align: left; justify-self: stretch; min-width: 0; }
+/* bound the tag to its (now fractional) track so it ellipsizes instead of
+   overrunning the name; without this justify-self:start sizes it to content. */
+.cv-rows .cv-ctag { max-width: 100%; min-width: 0; }
+.cv-rows .cv-due { text-align: left; justify-self: end; }
+.cv-due { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); flex: none; }
+.cv-late { color: var(--neg); }
+.cv-done { color: var(--signal); }
+.cv-filter { max-width: 200px; margin-bottom: 7px; }
+.cv-note { font-size: 11.5px; color: var(--ink-faint); margin: 2px 0 6px; }
+
+/* overdue */
+.cv-x {
+  font: inherit; font-size: 14px; line-height: 1; color: var(--ink-faint); cursor: pointer;
+  background: none; border: none; border-radius: 6px; padding: 2px 6px; flex: none;
+}
+.cv-x:hover { color: var(--neg); background: rgba(var(--neg-rgb), 0.12); }
+.cv-unhide {
+  font: inherit; font-size: 11px; color: var(--ink-faint); cursor: pointer;
+  background: none; border: none; padding: 5px 0 0; text-decoration: underline dotted;
+}
+.cv-unhide:hover { color: var(--ink); }
+
+/* announcements */
+.cv-ann {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; min-width: 0;
+  font: inherit; font-size: 13px; color: var(--ink); background: none; border: none;
+  border-radius: 8px; padding: 5px 6px; cursor: pointer;
+}
+.cv-ann:hover { background: rgba(var(--ink-rgb), 0.05); }
+.cv-status { font-size: 12.5px; font-weight: 600; margin: 2px 0 0; color: var(--ink-dim); }
+.cv-status.cv-up { color: var(--signal); }
+.cv-status.cv-down { color: var(--neg); }
+.cv-annbody { font-size: 13.5px; line-height: 1.6; color: var(--ink); margin-top: 8px; word-break: break-word; }
+.cv-annbody img { max-width: 100%; height: auto; }
+.cv-annbody a { color: var(--brass); }
+
+/* gpa */
+.cv-gpa { display: flex; gap: 26px; margin: 4px 0 6px; }
+.cv-gpa__item { display: flex; flex-direction: column; }
+.cv-gpa__num { font-family: "Instrument Serif", serif; font-size: 44px; line-height: 1.05; color: var(--ink); }
+.cv-gpa__lab { font-family: "IBM Plex Mono", monospace; font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
+
+/* semesters */
+.cv-semrow { display: flex; align-items: baseline; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.cv-semrow:last-of-type { border-bottom: none; }
+.cv-semname { flex: 1; min-width: 0; }
+.cv-semcr { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-faint); }
+.cv-semgpa { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--brass); }
+.cv-semrow--current .cv-semname { color: var(--signal); }
+
+/* course cards */
+.cv-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+.cv-card {
+  display: flex; flex-direction: column; gap: 2px; padding: 9px 11px;
+  border: 1px solid var(--line); border-left: 3px solid var(--cvc, var(--brass)); border-radius: 10px;
+}
+.cv-card__code { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cv-card__pct { font-size: 17px; font-weight: 700; }
+.cv-card__letter { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); }
+.cv-tone-a { color: var(--signal); }
+.cv-tone-b { color: var(--brass); }
+.cv-tone-c { color: #d9a05c; }
+.cv-tone-d { color: var(--neg); }
+
+/* settings tab */
+.cv-conn { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 6px; }
+.cv-conn .pw-field { width: 260px; }
+.cv-settings .gym-head { margin-top: 22px; }
+.cv-semedit { display: flex; gap: 8px; align-items: center; margin: 6px 0; }
+.cv-semedit .pw-field { flex: 1; }
+.cv-num { flex: 0 0 96px !important; }
+.cv-credit-name { flex: 1; min-width: 0; font-size: 13px; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* course enable/disable + nickname rows (canvas settings) */
+.cv-course-off .cv-credit-name, .cv-course-off .cv-num { opacity: 0.45; }
+.cv-credit-orig { font-size: 11px; color: var(--ink-faint); margin-left: 7px; }
+
+/* semester class rows (settings) */
+.cv-semblock { padding: 2px 0 10px; border-bottom: 1px solid var(--line); margin-bottom: 10px; }
+.cv-classrow { margin-left: 28px; }
+.cv-addclass {
+  font: inherit; font-size: 11.5px; color: var(--ink-faint); cursor: pointer;
+  background: none; border: none; padding: 3px 0 0 28px; text-decoration: underline dotted;
+}
+.cv-addclass:hover { color: var(--ink); }
+.cv-semedit .pw-field:disabled { opacity: 0.6; }
+
+/* Per-course nickname/code editor rows (item 6): reuse .cv-semedit's flex row;
+   min-width:0 stops the two label inputs' placeholders from forcing overflow,
+   and on mobile the row wraps so name | nick | code | credits stack readably. */
+.cv-labelin { min-width: 0; }
+.cv-scalein { flex: 2 1 0 !important; } /* a cutoff list is longer than a nickname */
+.cv-scalein.cv-bad { border-color: var(--neg); }
+body.is-mobile .cv-labelrow { flex-wrap: wrap; }
+body.is-mobile .cv-labelrow .cv-credit-name { flex: 1 1 100%; }
+body.is-mobile .cv-labelin { flex: 1 1 40%; }
+body.is-mobile .cv-scalein { flex: 1 1 100% !important; }
+
+/* ---- Work plugin --------------------------------------------------------- */
+
+.wk-pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 0 10px; }
+.wk-pill {
+  font: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+  color: var(--ink-dim); background: none; border: 1px solid var(--line-2);
+  border-radius: 99px; padding: 3px 11px;
+}
+.wk-pill:hover { color: var(--ink); }
+.wk-pill.is-on { color: var(--ink); border-color: var(--brass); background: color-mix(in srgb, var(--brass) 16%, transparent); }
+
+.wk-add { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin: 2px 0 12px; }
+.wk-add .wk-datein { width: 132px; }
+.wk-up-msg { color: var(--brass); margin: -6px 0 12px; }
+.wk-up-msg[hidden] { display: none; }
+.wk-num { width: 92px; }
+.wk-or { font-size: 11.5px; color: var(--ink-faint); }
+
+/* floor the flexible middle track so a wide earned/amount cell can't starve the
+   time/name column to a couple of glyphs at narrow widget widths */
+.wk-rows { display: grid; grid-template-columns: max-content minmax(3.25rem, 1fr) max-content max-content; column-gap: 10px; overflow: hidden; container-type: inline-size; }
+/* In a cramped widget (zoomed-in dashboard) date + full time-span + earned
+   can't share one line — reflow so the time gets its own full-width line and
+   the earned pins right, instead of the time clipping to "4:30 P…". */
+@container (max-width: 340px) {
+  .wk-rows:not(.wk-rows--log) .wk-row:not(.wk-row--open) { grid-template-columns: none; display: flex; flex-wrap: wrap; gap: 1px 8px; align-items: baseline; }
+  .wk-rows:not(.wk-rows--log) .wk-row:not(.wk-row--open) .wk-earned { order: 2; margin-left: auto; }
+  .wk-rows:not(.wk-rows--log) .wk-row:not(.wk-row--open) .wk-time { order: 3; flex: 1 1 100%; }
+}
+/* Logged-shift rows are two lines by design: date + time span, then the money
+   on its own line. Putting the earned total in the same grid COLUMN as the
+   time is what left-aligns it directly under the times whatever the date's
+   width — and it leaves the time the whole track, so it never clips to
+   "4:30 P…". Date min-width keeps the times lined up down the list. */
+.wk-rows--log .wk-row:not(.wk-row--open) {
+  /* min-content floor on the time track: a grid track WILL shrink past its
+     content (flex items won't), which is what re-introduced the "4:30 P…"
+     clip when the money moved out of this row. */
+  grid-template-columns: max-content minmax(min-content, 1fr) max-content;
+  column-gap: 10px; row-gap: 2px; align-items: baseline;
+}
+.wk-rows--log .wk-row:not(.wk-row--open) .wk-date { grid-area: 1 / 1; min-width: 2.5rem; }
+/* Time spans the delete column on its own line, so at cramped widths it has
+   the whole row rather than fighting the × for it; the × rides line 2. */
+.wk-rows--log .wk-row:not(.wk-row--open) .wk-time { grid-area: 1 / 2 / 2 / 4; }
+.wk-rows--log .wk-row:not(.wk-row--open) .wk-earned { grid-area: 2 / 2; justify-self: start; }
+.wk-rows--log .wk-row:not(.wk-row--open) .pw-item-remove { grid-area: 2 / 3; }
+.wk-page { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
+.wk-page .gym-sub { margin: 0; }
+.wk-page .gym-btn:disabled { opacity: 0.4; cursor: default; }
+.wk-page .gym-btn:disabled:hover { background: rgba(var(--brass-rgb), 0.1); }
+.wk-row {
+  display: grid; grid-template-columns: subgrid; grid-column: 1 / -1;
+  align-items: center; padding: 5px 0; border-bottom: 1px solid var(--line);
+}
+.wk-row:last-child { border-bottom: none; }
+.wk-row--open { grid-template-columns: none; display: flex; flex-wrap: wrap; gap: 8px; }
+.wk-date { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+.wk-time { font-size: 13px; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wk-earned { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--brass); justify-self: end; }
+.wk-proj { font-size: 11px; color: var(--ink-faint); font-style: italic; }
+
+.wk-ts { display: flex; flex-direction: column; gap: 6px; }
+.wk-ts-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+/* keep a real min width on the name so, when the row can't fit, the share
+   input + amount + × wrap to a second line instead of spilling past the card */
+.wk-ts-row .pw-field:first-child { flex: 1 1 6rem; min-width: 0; }
+.wk-ts-poollabel { font-size: 12.5px; font-weight: 600; flex: 1; }
+.wk-ts-share { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--brass); min-width: 64px; text-align: right; }
+
+/* ---- Graph plugin --------------------------------------------------------- */
+
+html[data-page="graph"] .content { padding: 0; overflow: hidden; display: flex; }
+.gf { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.gf-bar {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); flex: none;
+}
+.gf-dir { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-dim); }
+.gf-pills { display: flex; gap: 6px; }
+.gf-maxnodes { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--ink-dim); white-space: nowrap; }
+.gf-maxnodes input { width: 76px; }
+.gf-status { font-size: 11.5px; color: var(--ink-faint); margin-left: auto; }
+.gf-status.is-live::before { content: "●"; color: var(--signal); margin-right: 6px; font-size: 9px; }
+.gf-stage { flex: 1; min-height: 0; position: relative; background: #0f0f1a; border-radius: 10px; overflow: hidden; }
+.gf-stage canvas { display: block; }
+.gf-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; height: 100%; }
+
+/* node card — bottom-left over the graph */
+.gf-card {
+  position: absolute; left: 18px; bottom: 18px; z-index: 5; width: min(320px, 60vw);
+  background: var(--panel); border: 1px solid var(--line-2); border-radius: 13px;
+  padding: 12px 14px; box-shadow: 0 18px 50px -18px rgba(0, 0, 0, 0.7);
+}
+.gf-card__x { position: absolute; top: 6px; right: 6px; }
+.gf-card__title { margin: 0 14px 2px 0; font-weight: 700; font-size: 14px; color: var(--ink); word-break: break-word; }
+.gf-card__meta { margin: 0; font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.08em; }
+.gf-card__file { margin: 6px 0 0; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gf-card__acts { display: flex; gap: 8px; margin-top: 10px; }
+
+/* preview modal */
+.gf-panel { width: min(680px, calc(100vw - 48px)); }
+.gf-previmg { max-width: 100%; height: auto; border-radius: 8px; }
+.gf-prevtext {
+  font-family: "IBM Plex Mono", monospace; font-size: 11.5px; line-height: 1.55; color: var(--ink);
+  white-space: pre-wrap; word-break: break-word; margin: 8px 0 0; max-height: 55vh; overflow-y: auto;
+}
+
+/* dashboard widget */
+.gf-wmount { height: 260px; position: relative; overflow: hidden; border-radius: 10px; background: #0f0f1a; }
+.gf-wmount canvas { display: block; }
+
+/* ---- Finance plugin ------------------------------------------------------- */
+
+.pwidget--fincategory, .pwidget--finincexp, .pwidget--finnetworth { display: flex; flex-direction: column; }
+.pwidget--fincategory .chart-mount, .pwidget--finincexp .chart-mount, .pwidget--finnetworth .chart-mount { flex: 1 1 auto; min-height: 180px; }
+
+.fin-rows { row-gap: 2px; }
+.fin-row { cursor: pointer; }
+.fin-row:hover .fin-label { color: var(--ink); }
+.fin-label { display: flex; flex-direction: column; gap: 1px; }
+.fin-cat { font-size: 10.5px; color: var(--ink-faint); }
+.fin-amt { font-family: "IBM Plex Mono", monospace; font-size: 13px; justify-self: end; }
+.fin-amt--out { color: var(--neg); }
+.fin-amt--in { color: var(--pos); }
+.fin-rows--subs .wk-row { grid-template-columns: minmax(0, 1fr) max-content max-content max-content; column-gap: 10px; }
+
+.fin-accts { display: flex; flex-direction: column; }
+.fin-acct { display: grid; grid-template-columns: minmax(0, 1fr) max-content max-content; align-items: center; column-gap: 10px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.fin-acct:last-child { border-bottom: none; }
+.fin-acct__name { font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fin-acct__mask { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); }
+.fin-acct__type { font-size: 11px; color: var(--ink-faint); text-transform: capitalize; }
+
+.fin-budgets { display: flex; flex-direction: column; gap: 10px; }
+.fin-budget-row { display: flex; flex-direction: column; gap: 3px; }
+.fin-budget-label { font-size: 12.5px; color: var(--ink); }
+.fin-budget-nums { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-dim); }
+.fin-budget-bar { height: 6px; border-radius: 99px; background: rgba(var(--ink-rgb), 0.08); overflow: hidden; }
+.fin-budget-fill { height: 100%; background: linear-gradient(90deg, var(--brass), var(--brass-deep)); }
+.fin-budget-fill--over { background: linear-gradient(90deg, var(--neg), var(--neg-deep)); }
+
+/* settings tab */
+.fin-conn-fields { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 0 10px; }
+.fin-conn-fields input { flex: 1 1 160px; }
+.fin-conn-fields select { flex: 0 0 120px; }
+.fin-conn-acts { display: flex; align-items: center; gap: 10px; margin: 4px 0 18px; flex-wrap: wrap; }
+.fin-items .set-row { padding: 6px 0; }
+.fin-budget-set { display: flex; flex-direction: column; gap: 6px; margin: 2px 0 18px; }
+.fin-budget-set-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--ink-dim); }
+.fin-budget-set-row input { width: 100px; }
+.fin-customcats { display: flex; flex-direction: column; gap: 6px; }
+.fin-customcat-row { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--ink-dim); }
+.fin-cat-dot { width: 9px; height: 9px; border-radius: 99px; flex: none; }
+.fin-newcat-set { display: flex; gap: 8px; margin-top: 6px; }
+.fin-newcat-set input { flex: 1; }
+
+/* explore tab */
+.fin-explore { display: flex; flex-direction: column; gap: 10px; }
+.fin-ex-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.fin-ex-q { flex: 1 1 200px; }
+.fin-ex-filters select { max-width: 170px; }
+.fin-ex-filters input[type="date"] { flex: 0 0 148px; }
+.fin-ex-head {
+  display: grid; grid-template-columns: subgrid; grid-column: 1 / -1;
+  align-items: center; padding: 4px 0; border-bottom: 1px solid var(--line-2);
+}
+.fin-ex-sort {
+  font: inherit; font-size: 11px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--ink-faint); background: none; border: none; padding: 0; cursor: pointer; text-align: left;
+}
+.fin-ex-sort:hover { color: var(--ink-dim); }
+.fin-ex-sort--label { cursor: default; }
+.fin-ex-sort--label:hover { color: var(--ink-faint); }
+.fin-ex-sort--right { text-align: right; justify-self: end; }
+.fin-ex-acct { font-size: 11.5px; color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* multi-select: a leading checkbox column ahead of date/name/account/amount */
+.fin-ex-rows { grid-template-columns: max-content max-content minmax(3.25rem, 1fr) max-content max-content; }
+.fin-ex-check { align-self: center; justify-self: center; }
+.fin-ex-row.is-selected { background: rgba(var(--brass-rgb), 0.07); }
+/* :not([hidden]) so toggling the `hidden` attr still hides it (a bare
+   display:flex would outrank [hidden] and pin the bar open). */
+.fin-ex-bulk:not([hidden]) {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  margin: 2px 0 10px; padding: 8px 12px; border: 1px solid var(--brass-deep);
+  border-radius: 10px; background: rgba(var(--brass-rgb), 0.08);
+}
+.fin-ex-bulk__count { font-size: 12.5px; color: var(--ink); font-weight: 600; }
+.fin-ex-bulk select { max-width: 220px; }
+
+/* ---- Ladder plugin -------------------------------------------------------- */
+
+html[data-page="ladder"] .content { padding: 0; overflow: hidden; display: flex; }
+.lad { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.lad-bar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 16px; border-bottom: 1px solid var(--line); flex: none;
+}
+.lad-title { flex: 1 1 180px; max-width: 300px; }
+.lad-bar .lad-addr { flex: 1 1 200px; max-width: 280px; }
+.lad-bar select { flex: 0 1 auto; width: auto; max-width: 190px; }
+.lad-bar input[type="date"] { flex: 0 0 148px; }
+.lad-bar #lad-status { margin-left: auto; }
+.lad-notices { flex: none; padding: 0 16px; }
+.lad-notice { margin: 6px 0 0; font-size: 12px; color: var(--ink-faint); }
+.lad-notice--warn { color: var(--brass); }
+.lad-scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.lad-canvas { position: relative; margin: 8px 16px 24px; }
+
+.lad-daylabel {
+  position: absolute; left: 0; z-index: 3; width: 52px;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--brass); line-height: 1.2;
+}
+.lad-dayline {
+  position: absolute; left: 0; right: 0; z-index: 3; height: 0;
+  border-top: 1px solid color-mix(in srgb, var(--brass) 55%, transparent);
+  pointer-events: none;
+}
+.lad-hour {
+  position: absolute; left: 0; width: 48px; z-index: 0;
+  font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint);
+  border-top: 1px solid var(--line); padding-top: 1px; opacity: 0.7;
+}
+.lad-nowline {
+  position: absolute; left: 0; right: 0; z-index: 4; height: 0;
+  border-top: 2px solid var(--neg); pointer-events: none;
+}
+.lad-nowline::before { content: ''; position: absolute; left: -1px; top: -5px; width: 8px; height: 8px; border-radius: 99px; background: var(--neg); }
+
+.lad-sleep {
+  position: absolute; left: 56px; right: 8px; z-index: 1;
+  background: repeating-linear-gradient(-45deg, rgba(var(--ink-rgb), 0.03), rgba(var(--ink-rgb), 0.03) 8px, transparent 8px, transparent 16px);
+  border: 1px dashed var(--line); border-radius: 10px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+.lad-sleep > span { font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-faint); }
+.lad-sleep .lad-sleep__time { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; letter-spacing: 0; text-transform: none; color: var(--ink-dim); }
+
+.lad-card {
+  position: absolute; left: 56px; right: 8px; z-index: 2;
+  border-radius: 8px; padding: 4px 10px; overflow: hidden; box-sizing: border-box;
+  border: 1px solid var(--line-2); background: var(--panel);
+  /* Top-anchored, not centered: a card stretched past its true duration (see
+     MIN_CARD_H in ladderui.js) grows downward only — the title stays pinned
+     at the block's real start time instead of drifting into the borrowed
+     space that the next block (drawn after, so painted on top) may cover. */
+  display: flex; flex-direction: column; justify-content: flex-start; gap: 1px;
+}
+.lad-card__title { font-size: 12.5px; font-weight: 600; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lad-card__time { font-family: "IBM Plex Mono", monospace; font-size: 10.5px; color: var(--ink-dim); }
+.lad-card__loc { font-size: 10.5px; color: var(--ink-faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lad-card__loc--bad { color: var(--neg); }
+.lad-card__x { position: absolute; top: 4px; right: 4px; z-index: 3; }
+/* Compact cards (h < 34px, see MIN_CARD_H/compact in ladderui.js) are barely
+   taller than the button itself — a fixed top offset reads off-center (and
+   can clip against the card's overflow:hidden) once the card shrinks to the
+   y-map's floor height. Center on the card's own y-axis instead. */
+.lad-card__x--mid { top: 50%; transform: translateY(-50%); }
+.lad-card--editable { cursor: pointer; }
+.lad-card--cal { border-left: 3px solid #7986cb; }
+.lad-card--shift { border-left: 3px solid #e67c73; }
+.lad-card--gym { border-left: 3px solid var(--pos); }
+.lad-card--meal { border-left: 3px solid #f6bf26; }
+.lad-card--flex { border-left: 3px solid var(--brass); background: color-mix(in srgb, var(--brass) 8%, var(--panel)); }
+/* set (fixed) events read as commitments, like calendar events — solid rail,
+   no flex tint — but in their own violet so they're distinct from Google's. */
+.lad-card--set { border-left: 3px solid #a48ce0; }
+.lad-drive--to-set { border-left-color: #a48ce0; }
+.lad-card--attached { border-left-style: double; border-left-width: 5px; }
+
+/* Per-day calendar buttons, right-aligned at each day boundary. */
+.lad-daybtns { position: absolute; right: 8px; z-index: 4; display: flex; gap: 6px; }
+.lad-daybtn {
+  font-size: 10.5px; padding: 2px 8px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--line-2); background: var(--bg); color: var(--ink-dim);
+}
+.lad-daybtn:hover { color: var(--ink); border-color: var(--brass); }
+.lad-daybtn.is-pushed { color: #7fca9b; border-color: color-mix(in srgb, var(--pos) 45%, var(--line-2)); }
+.lad-daybtn--rm:hover { color: var(--neg); border-color: #c0564b; }
+.lad-push-all { margin-left: 4px; }
+
+/* A drive is an INDEPENDENT block: its own full card (all four borders,
+   rounded corners), sitting immediately before the event it drives to —
+   adjacent, never fused. The left rail wears the destination's accent and
+   the label names the destination, so the pairing stays obvious. */
+.lad-card--drive {
+  /* Above the default .lad-card z-index (2): its bottom is pinned to the
+     destination's top edge (see the bottom-anchored stretch in ladderui.js),
+     so this is belt-and-suspenders — the drive should never end up visually
+     covered by anything it's adjacent to. */
+  z-index: 3;
+  background: repeating-linear-gradient(-45deg, rgba(var(--ink-rgb), 0.05), rgba(var(--ink-rgb), 0.05) 5px, transparent 5px, transparent 10px), var(--bg);
+  border-style: dashed; border-color: var(--line-2);
+  border-left-width: 3px; border-left-style: solid;
+  padding: 0 10px; justify-content: center;
+}
+.lad-card--drive .lad-card__title { font-size: 10.5px; font-weight: 500; color: var(--ink-dim); }
+.lad-drive--to-cal { border-left-color: #7986cb; }
+.lad-drive--to-shift { border-left-color: #e67c73; }
+.lad-drive--to-gym { border-left-color: var(--pos); }
+.lad-drive--to-meal { border-left-color: #f6bf26; }
+.lad-drive--to-flex { border-left-color: var(--brass); }
+.lad-drive--to-home { border-left-color: var(--ink-faint); }
+.lad-drive--to-work { border-left-color: #e67c73; }
+/* Per-gap override select, floated at the drive card's right edge — same
+   corner language as .lad-card__x, sized to sit inside even a thin card.
+   The card reserves room on the right so its own (ellipsis-truncated) title
+   never sits underneath it. */
+.lad-card--drive-ovr .lad-card__title { padding-right: 84px; }
+.lad-gap-ovr {
+  position: absolute; top: 50%; right: 4px; transform: translateY(-50%); z-index: 3;
+  font-size: 9.5px; max-width: 80px; padding: 1px 16px 1px 4px;
+  /* native caret drew over the (already truncated) text; reserve a right gutter
+     and paint our own small chevron so nothing overlaps */
+  -webkit-appearance: none; -moz-appearance: none; appearance: none;
+  border: 1px solid var(--line-2); border-radius: 4px; color: var(--ink-dim);
+  background: var(--bg) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='6' viewBox='0 0 8 6'%3E%3Cpath d='M1 1l3 3 3-3' fill='none' stroke='%23888' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 4px center;
+}
+
+.lad-settings .lad-addr { min-width: 260px; }
+.lad-cancel-edit { color: var(--ink-faint); }
+.gym-times { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; margin-top: 12px; }
+.gym-times-hint { font-size: 11px; color: var(--ink-faint); min-width: 0; }
+.gym-hours { display: flex; align-items: center; gap: 7px; }
+/* Today-only plan override. Wraps and lets the select shrink, so a narrow
+   widget (or a phone) stacks the two controls instead of pushing the button
+   off the card's right edge. */
+.gym-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 10px; }
+.gym-pick-sel { flex: 1 1 150px; min-width: 0; }
+/* Pull an exercise into today's session that the workout doesn't own. Sits at
+   the end of the exercise list, so it reads as "…and one more thing". */
+.gym-addex { margin-top: 10px; }
+.gym-addex-sel { width: 100%; min-width: 0; }
+.gym-extra {
+  font-family: "IBM Plex Mono", monospace; font-size: 9.5px; letter-spacing: 0.04em;
+  color: var(--brass); background: color-mix(in srgb, var(--brass) 14%, transparent);
+  border-radius: 5px; padding: 1px 5px; vertical-align: middle;
+}
+
+/* recategorize modal */
+.fin-panel { width: min(480px, calc(100vw - 48px)); }
+.fin-modal-body { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+/* Long vendor names in the checkbox labels must wrap, not force a wider panel.
+   The label text lives in one <span> so it stays a single flex item (bare text
+   nodes would each become their own flex item and scatter across the row). */
+.fin-modal-body .gym-check { white-space: normal; align-items: flex-start; line-height: 1.4; }
+.fin-modal-body .gym-check span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fin-field-label { font-size: 11.5px; color: var(--ink-faint); }
+/* :not([hidden]) so the `hidden` attribute (display:none) still wins — a bare
+   `.fin-newcat { display:flex }` outranks [hidden] and leaks the field always. */
+.fin-newcat:not([hidden]) { display: flex; gap: 8px; }
+.fin-newcat input { flex: 1; }
+
+/* ---- Sleep plugin ---------------------------------------------------------- */
+.sl-add .sl-type { width: 84px; }
+.sl-add .sl-dur, .sl-add .sl-bed, .sl-add .sl-wake { width: 92px; }
+.sl-stars { display: inline-flex; gap: 1px; }
+.sl-star { background: none; border: none; padding: 0 1px; cursor: pointer; font-size: 15px; line-height: 1; color: var(--ink-faint); opacity: 0.45; transition: opacity 0.12s, color 0.12s; }
+.sl-star.is-on { color: var(--brass); opacity: 1; }
+.sl-star:hover { opacity: 0.85; }
+.sl-q { color: var(--brass); font-size: 11px; letter-spacing: 1px; }
+.sl-debtline--owed { color: #e0a35c; }
+.pwidget--slhours .chart-mount, .pwidget--sldebt .chart-mount { height: 220px; }
+.sl-bad { border-color: #c0564b !important; }
+
+/* ---- Course Planner ------------------------------------------------------ */
+/* Planner flows with the page (the .content area scrolls) — no inner scrollbox.
+   The Map keeps a fixed-height frame so the board can pan/zoom inside it. */
+.cp { display: flex; flex-direction: column; }
+html[data-page="course-explore"] .cp { height: 100%; min-height: 0; }
+.cp-bar { display: flex; align-items: center; gap: 8px; padding: 4px 0 10px; flex-wrap: wrap; }
+.cp-calc { background: var(--brass); color: #1a1206; border-color: var(--brass-deep); font-weight: 600; }
+.cp-bar #cp-status { margin-left: auto; }
+.cp-notices:empty { display: none; }
+.cp-notices { margin-bottom: 8px; }
+.cp-panel { flex: none; }
+.cp-boardwrap { flex: 1; min-height: 0; border: 1px solid var(--line-2); border-radius: 12px; background: var(--bg); overflow: hidden; }
+.cp-board, .cp-svg { width: 100%; height: 100%; display: block; }
+.cp-svg { cursor: grab; touch-action: none; }
+.cp-svg.is-drag { cursor: grabbing; }
+.cp-empty { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--ink-faint); font-size: 13px; text-align: center; padding: 20px; }
+
+.cp-group { margin-bottom: 16px; }
+.cp-group__head { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 8px; }
+.cp-group__head .gym-sub { display: block; font-weight: 400; margin-top: 2px; }
+
+.cp-terms { display: flex; flex-wrap: wrap; gap: 6px; }
+.cp-term { display: inline-flex; align-items: center; border: 1px solid var(--line-2); border-radius: 999px; overflow: hidden; }
+.cp-term.is-current { border-color: var(--brass); }
+.cp-term__name { padding: 3px 4px 3px 11px; font-size: 12px; color: var(--ink-dim); cursor: pointer; }
+.cp-term.is-current .cp-term__name { color: var(--brass); }
+.cp-term__x { padding: 3px 9px 3px 4px; color: var(--ink-faint); cursor: pointer; }
+.cp-term__x:hover { color: var(--neg); }
+.cp-addterm { display: flex; gap: 6px; align-items: center; margin-top: 8px; }
+.cp-addterm select { width: 120px; flex: none; }
+.cp-addterm .wk-num { width: 86px; }
+
+.cp-summers { display: flex; flex-wrap: wrap; gap: 8px; }
+.cp-summer { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-dim); border: 1px solid var(--line); border-radius: 8px; padding: 4px 9px; }
+.cp-summer.is-off { color: var(--ink-faint); border-style: dashed; text-decoration: line-through; }
+
+/* One shared grid for every row: the text columns (code/title/prereq/coreq/
+   pre-or-co) size to their widest cell's content, so widening one cell widens
+   the whole column. Rows use subgrid to hang on these shared tracks. */
+.cp-classes {
+  display: grid; padding-bottom: 6px; row-gap: 5px; column-gap: 5px; width: 100%; align-content: start;
+  /* Code and each requirement column size to their OWN content (independent —
+     a long prereq widens only the Prereq column). Title flexes to absorb the
+     remaining page width, so the table fills the page with no scrollbox.
+     Subgrid keeps every column aligned across rows. The Title has a real min
+     (7rem) so at narrow widths the nine columns don't crush it to zero — the
+     table keeps its usable width and scrolls horizontally instead. */
+  overflow-x: auto;
+  grid-template-columns: max-content minmax(7rem, 1fr) 50px max-content max-content max-content 44px 96px 24px;
+}
+/* credits input inherits .wk-num's 92px — clamp it to its own 50px cell so it
+   never spills over the Prereq column */
+.cp-row .cp-cr { width: 100%; }
+.cp-rowhead, .cp-row { display: grid; grid-template-columns: subgrid; grid-column: 1 / -1; align-items: center; }
+.cp-rowhead { font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-faint); padding: 0 2px 3px; }
+/* size-attr drives the column's max-content width; stretch then fills each
+   cell so every box in a column matches the widest one */
+.cp-row .pw-field { padding: 5px 7px; font-size: 12px; min-width: 0; justify-self: stretch; }
+.cp-su { font-size: 11px; color: var(--ink-dim); justify-content: center; gap: 3px; }
+.cp-emptyrow { grid-column: 1 / -1; }
+
+/* board pieces */
+.cp-col__bg { fill: rgba(var(--ink-rgb), 0.018); stroke: var(--line); }
+.cp-col--current .cp-col__bg { fill: rgba(var(--brass-rgb), 0.05); }
+.cp-col--future .cp-col__bg { fill: rgba(var(--signal-rgb), 0.045); }
+.cp-col__label { fill: var(--ink); font-size: 13px; font-weight: 600; }
+.cp-col__sub { fill: var(--ink-faint); font-size: 10px; }
+.cp-ribbon { fill: none; stroke-width: 2; opacity: 0.5; }
+.cp-ribbon--prereq { stroke: var(--signal); }
+.cp-ribbon--coreq { stroke: var(--pos); stroke-dasharray: 4 3; }
+.cp-box { cursor: pointer; }
+.cp-box__bg { fill: var(--panel); stroke: var(--line-2); stroke-width: 1.2; }
+.cp-box--past .cp-box__bg { fill: var(--bg); }
+.cp-box--current .cp-box__bg { fill: color-mix(in srgb, var(--panel) 88%, var(--brass)); stroke: var(--brass); }
+.cp-box--future .cp-box__bg { fill: color-mix(in srgb, var(--panel) 92%, var(--signal)); stroke: rgba(var(--signal-rgb), 0.5); }
+.cp-box:hover .cp-box__bg { stroke: var(--brass); }
+.cp-box__code { fill: var(--ink); font-size: 12px; font-weight: 600; }
+.cp-box__title { fill: var(--ink-dim); font-size: 10.5px; }
+.cp-box__cr { fill: var(--ink-faint); font-size: 11px; font-family: "IBM Plex Mono", monospace; }
+
+/* class modal */
+.cp-modal { position: absolute; inset: 0; background: rgba(6, 8, 12, 0.72); display: flex; align-items: center; justify-content: center; z-index: 40; }
+.cp-modal__box { position: relative; width: min(460px, 90%); background: var(--panel); border: 1px solid var(--line-2); border-radius: 14px; padding: 22px 24px; }
+.cp-modal__x { position: absolute; top: 12px; right: 14px; font-size: 20px; color: var(--ink-faint); cursor: pointer; }
+.cp-modal__x:hover { color: var(--ink); }
+.cp-modal__code { font-size: 18px; color: var(--ink); margin: 0 0 2px; }
+.cp-modal__cr { font-size: 13px; color: var(--ink-faint); font-weight: 400; }
+.cp-modal__title { color: var(--ink-dim); margin: 0 0 16px; }
+.cp-modal__reqs h4 { font-size: 12px; color: var(--ink); margin: 12px 0 4px; }
+.cp-modal__reqs ul { margin: 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-dim); }
+.cp-modal__reqs li { margin: 2px 0; }
+.cp-mut { color: var(--ink-faint); }
+
+/* ---- Notes plugin ------------------------------------------------------- */
+.nt { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.nt-body { flex: 1; min-height: 0; display: flex; gap: 14px; margin-top: 12px; }
+.nt-tree { width: 240px; flex: none; overflow-y: auto; padding-right: 6px; }
+.nt-dir > summary { cursor: pointer; font-size: 12px; color: var(--ink-dim); font-weight: 600; padding: 3px 4px; border-radius: 6px; user-select: none; }
+.nt-dir > summary:hover { color: var(--ink); }
+.nt-dir { padding-left: 10px; }
+.nt-tree > .nt-dir { padding-left: 0; }
+.nt-note { display: block; width: 100%; text-align: left; background: none; border: 0; color: var(--ink-dim); font: inherit; font-size: 12.5px; padding: 3px 8px; border-radius: 6px; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nt-note:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.04); }
+.nt-note.is-open { color: var(--brass); background: rgba(var(--ink-rgb), 0.05); }
+/* Generated blocks inside a note: plotted graphs, redrawn figures, tables.
+   Everything is stroked in currentColor so one rule covers light and dark. */
+.ng-mount, .nt-figure { margin: 14px 0; overflow-x: auto; }
+.nt-figure { color: var(--ink); }
+.nt-figure svg, .ng-svg { max-width: 100%; height: auto; display: block; }
+.ng-svg .ng-grid { stroke: var(--line, currentColor); opacity: .18; stroke-width: 1; }
+.ng-svg .ng-axis { stroke: currentColor; opacity: .55; stroke-width: 1.2; }
+.ng-svg .ng-pt { fill: currentColor; }
+.ng-svg { color: var(--ink); }
+/* Labels are typeset with mathlive, so they are HTML in a <foreignObject>
+   rather than <text>: the box is generous and CSS does the alignment, because
+   the rendered width of a formula isn't knowable when the SVG is built. */
+.ng-svg .ng-fo { display: flex; align-items: center; height: 100%; font-size: 11px;
+  line-height: 1; color: currentColor; opacity: .75; white-space: nowrap; overflow: visible; }
+.ng-svg .ng-fo--c { justify-content: center; }
+.ng-svg .ng-fo--r { justify-content: flex-end; }
+.ng-svg .ng-fo--l { justify-content: flex-start; }
+.ng-svg .ng-fo--title { justify-content: center; font-size: 13px; font-weight: 600; opacity: 1; }
+.ng-svg .ng-fo .ML__latex { font-size: inherit; }
+/* Markdown tables in notes — the converter now emits real ones. */
+.nt-md table { border-collapse: collapse; margin: 12px 0; font-size: 14px; display: block; overflow-x: auto; max-width: 100%; }
+.nt-md th, .nt-md td { border: 1px solid var(--line, rgba(127,127,127,.3)); padding: 6px 10px; text-align: left; }
+.nt-md th { background: var(--hover, rgba(127,127,127,.08)); font-weight: 600; }
+
+/* 30-day archive of deleted notes. The path may be long and must not push the
+   buttons off the row, so it is the only thing allowed to shrink. */
+.nt-arch { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; }
+.nt-arch__row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; }
+.nt-arch__row:hover { background: var(--hover, rgba(127, 127, 127, .08)); }
+.nt-arch__path { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nt-arch__meta { flex: none; font-size: 12px; color: var(--muted); }
+@media (max-width: 820px) {
+  .nt-arch__row { flex-wrap: wrap; }
+  .nt-arch__path { flex-basis: 100%; }
+}
+
+.nt-view { flex: 1; min-width: 0; overflow-y: auto; padding: 18px 22px; }
+.nt-view__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.nt-view__title { margin: 0; font-size: 18px; color: var(--ink); }
+.nt-md { margin-top: 12px; }
+.nt-md .nt-wiki, .nt-wiki { color: var(--brass); text-decoration: none; border-bottom: 1px dotted var(--brass); cursor: pointer; }
+.nt-embed { max-width: 100%; height: auto; border-radius: 8px; margin-top: 8px; }
+.nt-md .eq-render { margin: 8px 0; } /* block equations reuse .eq-render (scaled to fit by fitEquations) */
+
+/* conversion queue */
+.nt-queue { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.nt-queue:empty { display: none; }
+.nt-qcard { background: rgba(var(--ink-rgb), 0.04); border: 1px solid var(--line-2); border-radius: 10px; padding: 10px 12px; }
+.nt-qtop { display: flex; align-items: center; gap: 10px; }
+.nt-qlabel { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.nt-qstatus { font-size: 11.5px; color: var(--ink-faint); white-space: nowrap; }
+.nt-qbar { height: 6px; border-radius: 99px; background: rgba(var(--ink-rgb), 0.08); overflow: hidden; margin-top: 8px; }
+.nt-qfill { height: 100%; background: linear-gradient(90deg, var(--brass), var(--brass-deep)); transition: width 0.45s linear; }
+.nav__item.is-busy .nav__dot { background: var(--brass); box-shadow: 0 0 8px var(--brass); animation: nt-pulse 1.4s infinite ease-in-out; }
+@keyframes nt-pulse { 50% { opacity: 0.35; } }
+
+/* upload/preview modal */
+.nt-panel { width: min(760px, calc(100vw - 48px)); max-height: calc(100vh - 64px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.nt-files { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.st-bundle { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink-dim); margin: 8px 0 0; cursor: pointer; }
+.st-qall { margin: 2px 0 6px; }
+.st-bundle input { accent-color: var(--accent, #7aa2f7); }
+.nt-apple { display: flex; align-items: center; gap: 8px; }
+.nt-apple select { flex: 1; min-width: 0; }
+.nt-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-dim); background: rgba(var(--ink-rgb), 0.06); border-radius: 999px; padding: 3px 6px 3px 10px; max-width: 260px; overflow: hidden; }
+.nt-chip__x { background: none; border: 0; color: var(--ink-faint); font-size: 14px; cursor: pointer; padding: 0 4px; }
+.nt-chip__x:hover { color: var(--ink); }
+.nt-text { width: 100%; resize: vertical; font: inherit; font-size: 13px; }
+.nt-rawmd { font-family: "IBM Plex Mono", monospace; font-size: 12px; }
+.nt-dest { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; }
+.nt-dest label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-dim); }
+.nt-fname { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ink-dim); }
+.nt-acts { display: flex; gap: 8px; justify-content: flex-end; }
+.nt-prevmd { max-height: 46vh; overflow-y: auto; border: 1px solid var(--line-2); border-radius: 10px; padding: 12px 16px; }
+.nt-error { margin: 0; font-size: 12.5px; color: var(--neg); }
+
+/* ---- formal (housing planner) ------------------------------------------- */
+
+.fm-house { display: flex; flex-direction: column; gap: 9px; }
+.fm-head { display: flex; align-items: center; gap: 6px; }
+.fm-head .fm-name { flex: 1; }
+.fm-name { font-weight: 600; }
+.fm-dup { background: none; border: none; color: var(--ink-faint); font-size: 15px; cursor: pointer; padding: 2px 4px; }
+.fm-dup:hover { color: var(--brass); }
+.fm-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fm-linkin { flex: 1 1 140px; min-width: 0; }
+.fm-open { color: var(--brass); text-decoration: none; font-size: 14px; }
+.fm-lab { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--ink-dim); }
+.fm-num { width: 84px; }
+.fm-date { width: 130px; color-scheme: dark; }
+.fm-num--sm { width: 56px; }
+.fm-ppb { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--brass); margin-left: auto; }
+
+/* bed palette (drag sources) */
+.fm-palette { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; padding: 7px 9px; border: 1px dashed var(--line-2); border-radius: 10px; }
+.fm-palette .fm-bi { cursor: grab; }
+.fm-palette .fm-bi:hover { border-color: var(--brass); color: var(--ink); }
+.fm-palette .fm-bi:active { cursor: grabbing; }
+.fm-palhint { font-size: 11px; color: var(--ink-faint); margin-left: auto; align-self: center; text-align: right; }
+
+/* room cards flow side by side */
+.fm-rooms { display: flex; flex-wrap: wrap; gap: 8px; align-items: stretch; }
+.fm-roomcard { display: flex; flex-direction: column; gap: 5px; padding: 6px 8px 7px; border: 1px solid var(--line-2); border-radius: 10px; background: rgba(var(--ink-rgb), 0.02); min-width: 118px; }
+.fm-roomcard.is-over { border-color: var(--brass); background: color-mix(in srgb, var(--brass) 10%, transparent); }
+.fm-roomhead { display: flex; align-items: center; gap: 4px; }
+.fm-rname { flex: 1; min-width: 70px; width: 70px; background: none; border: none; border-bottom: 1px solid transparent; color: var(--ink); font: inherit; font-size: 12px; font-weight: 600; padding: 1px 0; }
+.fm-rname::placeholder { color: var(--ink-dim); font-weight: 600; }
+.fm-rname:focus { outline: none; border-bottom-color: var(--brass); }
+.fm-roombeds { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; min-height: 52px; flex: 1; }
+.fm-roombeds .fm-bi { cursor: pointer; }
+.fm-roombeds .fm-bi:hover { border-color: var(--neg); color: var(--neg); }
+.fm-drophint { font-size: 11px; color: var(--ink-faint); font-style: italic; align-self: center; padding: 0 4px; }
+.fm-rasg { font-size: 11.5px; color: var(--ink-dim); }
+.fm-rasg--c { color: var(--brass); }
+.fm-addroom { min-width: 74px; border: 1px dashed var(--line-2); border-radius: 10px; background: none; color: var(--ink-dim); font: inherit; font-size: 12.5px; cursor: pointer; }
+.fm-addroom:hover { border-color: var(--brass); color: var(--ink); }
+
+/* bed icons — top view, width tracks real mattress width (76" → 38"),
+   pillow band at the head; futon flat/dashed; couch low with arms */
+.fm-bi { position: relative; display: inline-flex; align-items: center; justify-content: center; font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-dim); border: 1px solid var(--line-2); border-radius: 5px; background: rgba(var(--ink-rgb), 0.04); user-select: none; }
+.fm-bi--king, .fm-bi--queen, .fm-bi--full, .fm-bi--twin { padding-top: 9px; }
+.fm-bi--king::before, .fm-bi--queen::before, .fm-bi--full::before, .fm-bi--twin::before { content: ''; position: absolute; top: 3px; left: 4px; right: 4px; height: 6px; border: 1px solid var(--line-2); border-radius: 2px; opacity: 0.8; }
+.fm-bi--king { width: 47px; height: 50px; }
+.fm-bi--queen { width: 37px; height: 50px; }
+.fm-bi--full { width: 34px; height: 47px; }
+.fm-bi--twin { width: 24px; height: 47px; }
+.fm-bi--twin::before { left: 3px; right: 3px; }
+.fm-bi--futon { width: 34px; height: 44px; border-style: dashed; }
+.fm-bi--couch { width: 45px; height: 22px; border-radius: 7px; border-left: 4px solid var(--line-2); border-right: 4px solid var(--line-2); }
+.fm-bi--sleeper { width: 54px; height: 27px; border-radius: 7px; border-left: 4px solid var(--line-2); border-right: 4px solid var(--line-2); border-bottom-width: 3px; }
+
+.fm-cap { margin: 0; }
+.fm-cap strong { color: var(--ink); font-weight: 600; }
+.fm-fit { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid var(--line); }
+.fm-lab--slider { flex: 1 1 180px; }
+.fm-fit-dates { flex: 1; min-width: 100px; accent-color: var(--brass); }
+.fm-fit-dn { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink); min-width: 2ch; text-align: right; }
+.fm-totals { margin: 0; font-size: 12.5px; color: var(--ink-dim); }
+.fm-totals strong { color: var(--ink); font-weight: 600; }
+
+/* ---- formal expense tracker */
+.fmx-bros { margin-left: auto; white-space: nowrap; }
+.fmx-items { display: flex; flex-direction: column; gap: 8px; }
+.fmx-item { border: 1px solid var(--line-2); border-radius: 10px; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.fmx-item.is-paid { opacity: 0.55; }
+.fmx-main, .fmx-meta { display: flex; align-items: center; gap: 8px; }
+.fmx-paid { accent-color: var(--brass); }
+.fmx-name { flex: 2 1 120px; min-width: 0; }
+.fmx-cat { flex: 1 1 80px; min-width: 0; font-size: 12px; }
+.fmx-n { width: 72px; }
+.fmx-per { border: 1px solid var(--line-2); border-radius: 8px; background: none; color: var(--ink-dim); font: inherit; font-size: 11.5px; padding: 3px 7px; cursor: pointer; white-space: nowrap; }
+.fmx-per:hover { border-color: var(--brass); }
+.fmx-per.is-on { color: var(--brass); border-color: var(--brass); }
+.fmx-rt { font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink); min-width: 8ch; text-align: right; }
+.fmx-link, .fmx-note { flex: 1 1 100px; min-width: 0; font-size: 12px; }
+.fmx-cats { color: var(--ink-dim); font-size: 12px; }
+
+/* ---- formal per-house surface switches */
+.fm-uses { display: inline-flex; gap: 6px; align-self: center; }
+.fm-use { display: inline-flex; align-items: center; font-size: 11px; color: var(--ink-faint); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 9px; cursor: pointer; user-select: none; white-space: nowrap; }
+.fm-use:hover { border-color: var(--brass); }
+.fm-use.is-on { color: var(--brass); border-color: var(--brass); }
+.fm-use input { display: none; }
+.fm-bi--off { opacity: 0.35; }
+
+/* ---- study plugin ---------------------------------------------------------- */
+.st { display: flex; flex-direction: column; gap: 12px; height: 100%; min-height: 0; }
+.st-view { min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+
+/* course tabs */
+.st-tabs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--line); padding-bottom: 10px; }
+.st-tab { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line-2); border-radius: 999px; background: none; color: var(--ink-dim); font: inherit; font-size: 13px; padding: 5px 14px; cursor: pointer; white-space: nowrap; }
+.st-tab:hover { color: var(--ink); border-color: var(--brass); }
+.st-tab.is-active { color: var(--brass); border-color: var(--brass); background: rgba(var(--brass-rgb), 0.08); }
+.st-tab--add { padding: 5px 11px; color: var(--ink-faint); }
+.st-tab--edit { padding: 0; }
+.st-tab__in { background: none; border: none; color: var(--brass); font: inherit; font-size: 13px; padding: 5px 14px; width: 14ch; outline: none; }
+/* Its own padded hit box so a tap lands on the close, not the parent tab
+   (the JS layer adds stopPropagation). Negative margin keeps the visual size
+   close to before while the hit area grows. */
+.st-tab__x { display: inline-flex; align-items: center; justify-content: center; padding: 3px 5px; margin: -3px -5px -3px -1px; border-radius: 6px; color: var(--ink-faint); font-size: 14px; line-height: 1; }
+.st-tab__x:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.08); }
+.st-tools { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* fit-to-page (Study chat + Flashcards): the content area stops scrolling and
+   the tool's own scroller (.st-msgs / .st-flash__content) takes over. Same
+   device as the email/calendar pages, but scoped per-tool via html.st-fit. */
+/* min-height:0 breaks the flex-item content floor — without it .content sizes
+   to its content (taller than the viewport) and .main just clips the excess,
+   which put the compose row and grade buttons below the fold. */
+html[data-page="study"].st-fit .content, html[data-page="flashcards"].st-fit .content { overflow: hidden; display: flex; min-height: 0; }
+html[data-page="study"].st-fit .st, html[data-page="flashcards"].st-fit .st { flex: 1; min-width: 0; height: auto; }
+html[data-page="study"].st-fit .st-view, html[data-page="flashcards"].st-fit .st-view { flex: 1; min-height: 0; }
+
+/* tutor chat */
+/* min-height:0 everywhere down the chain is what lets the internal scroller
+   shrink instead of pushing the compose row off the page. */
+.st-chat { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.st-msgs { flex: 1 1 auto; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding-right: 4px; }
+.st-msg { max-width: 46rem; font-size: 13.5px; line-height: 1.55; border-radius: 12px; padding: 8px 12px; }
+.st-msg p { margin: 0 0 6px; }
+.st-msg p:last-child { margin-bottom: 0; }
+.st-msg--tutor { align-self: flex-start; background: rgba(var(--ink-rgb), 0.06); border: 1px solid var(--line); }
+.st-msg--you { align-self: flex-end; background: rgba(var(--brass-rgb), 0.1); border: 1px solid rgba(var(--brass-rgb), 0.25); }
+.st-msg--result { align-self: stretch; max-width: none; background: none; border: 1px dashed var(--line-2); color: var(--ink-dim); font-size: 12.5px; }
+.st-msg--sys { align-self: center; background: none; color: var(--ink-faint); font-size: 12.5px; text-align: center; }
+.st-busy::after { content: ''; display: inline-block; width: 1ch; animation: st-ellipsis 1.2s steps(4) infinite; overflow: hidden; vertical-align: bottom; }
+@keyframes st-ellipsis { 0% { content: ''; } 25% { content: '.'; } 50% { content: '..'; } 75% { content: '...'; } }
+.st-compose { display: flex; gap: 8px; margin-top: 10px; }
+.st-compose .pw-field { flex: 1; }
+
+/* posed question */
+.st-qcard { align-self: stretch; display: flex; flex-direction: column; gap: 10px; border-color: var(--line-2); }
+.st-qhead { display: flex; align-items: center; gap: 8px; }
+.st-cat { font-size: 11px; letter-spacing: 0.04em; color: var(--brass); border: 1px solid rgba(var(--brass-rgb), 0.4); border-radius: 999px; padding: 2px 9px; white-space: nowrap; }
+.st-gen { font-size: 11px; color: var(--ink-faint); border: 1px solid var(--line-2); border-radius: 999px; padding: 2px 9px; }
+.st-qintro { font-size: 13.5px; line-height: 1.55; }
+.st-qintro p { margin: 0 0 6px; }
+.st-qintro p:last-child { margin-bottom: 0; }
+.st-part { display: flex; flex-direction: column; gap: 6px; }
+.st-part__prompt { font-size: 13px; color: var(--ink-dim); }
+.st-part__prompt p { margin: 0; }
+.st-part__hint { font-size: 11.5px; color: var(--ink-faint); }
+.st-vchip { font-size: 11.5px; }
+.st-vchip--ok { color: var(--signal); }
+.st-vchip--no { color: #e08a7a; }
+.st-part math-field.pw-mathfield { width: 100%; font-size: 17px; }
+.st-qacts { display: flex; gap: 8px; }
+
+/* question bank */
+.st-catsec { display: flex; flex-direction: column; gap: 10px; }
+.st-cathead { display: flex; align-items: baseline; gap: 10px; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.st-cathead__name { margin: 0; font-size: 13.5px; font-weight: 600; letter-spacing: 0.02em; }
+.st-acc { font-family: "IBM Plex Mono", monospace; font-size: 11.5px; color: var(--signal); }
+.st-acc.is-low { color: #e08a7a; }
+.st-acc--none { color: var(--ink-faint); }
+.st-count { margin-left: auto; font-size: 11.5px; color: var(--ink-faint); }
+.st-qrow { display: flex; gap: 10px; align-items: flex-start; border-bottom: 1px dashed var(--line); padding-bottom: 10px; }
+.st-qrow:last-child { border-bottom: none; padding-bottom: 0; }
+.st-qrow__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.st-qrow__acts { display: flex; align-items: center; gap: 6px; }
+.st-iconbtn { border: none; background: none; color: var(--ink-faint); font: inherit; font-size: 13px; cursor: pointer; padding: 2px 4px; }
+.st-iconbtn:hover { color: var(--brass); }
+.st-ans { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; font-size: 12.5px; }
+.st-ans__p { color: var(--ink-dim); }
+.st-ans__p p { margin: 0; display: inline; }
+.st-ans__a { color: var(--signal); }
+.st-ans__rule { font-size: 11px; color: var(--ink-faint); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; white-space: nowrap; }
+
+/* flashcards */
+.st-fcpanel { display: flex; flex-direction: column; gap: 10px; max-width: 34rem; }
+.st-ladder { margin: 0; font-size: 12px; color: var(--ink-faint); }
+.st-fcwrap { display: flex; flex-direction: column; gap: 12px; max-width: 40rem; width: 100%; align-self: center; flex: 1; min-height: 0; }
+.st-fcbar { display: flex; align-items: center; gap: 10px; font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-dim); }
+.st-fcbar .gym-btn { margin-left: auto; }
+.st-flash { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; cursor: pointer; text-align: center; font-size: 15px; line-height: 1.6; user-select: none; }
+.st-flash.is-flipped { border-color: rgba(var(--brass-rgb), 0.45); }
+.st-flash__content { max-width: 100%; overflow-x: auto; overflow-y: auto; min-height: 0; }
+.st-flash__content p { margin: 0 0 6px; }
+.st-flash__hint { font-size: 11.5px; color: var(--ink-faint); }
+.st-fcacts { display: flex; gap: 10px; justify-content: center; }
+.st-fcacts kbd { font-family: "IBM Plex Mono", monospace; font-size: 10px; color: var(--ink-faint); border: 1px solid var(--line-2); border-radius: 4px; padding: 0 4px; margin-left: 4px; }
+
+/* card bank */
+.st-crows { display: flex; flex-direction: column; gap: 10px; }
+.st-crow { display: flex; gap: 12px; align-items: baseline; border-bottom: 1px dashed var(--line); padding-bottom: 10px; font-size: 13px; }
+.st-crow:last-child { border-bottom: none; padding-bottom: 0; }
+.st-crow__front { flex: 1; min-width: 0; }
+.st-crow__back { flex: 1.4; min-width: 0; color: var(--ink-dim); }
+.st-crow__front p, .st-crow__back p { margin: 0 0 4px; }
+.st-duechip { font-family: "IBM Plex Mono", monospace; font-size: 11px; color: var(--ink-faint); white-space: nowrap; }
+
+/* markdown data tables (transcribed from source material) — .st covers the
+   page; .st-panel covers the review/editor overlays that live on body */
+.st table, .st-panel table { border-collapse: collapse; margin: 6px 0; font-size: 12.5px; }
+.st th, .st td, .st-panel th, .st-panel td { border: 1px solid var(--line-2); padding: 4px 10px; text-align: center; }
+.st th, .st-panel th { color: var(--ink-dim); font-weight: 600; background: rgba(var(--ink-rgb), 0.04); }
+
+/* figures + multiple choice */
+.st-qfigs { display: flex; flex-wrap: wrap; gap: 10px; }
+.st-qfig { max-width: min(420px, 100%); border: 1px solid var(--line-2); border-radius: 8px; background: #fff; }
+.st-choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.st-choice { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; border: 1px solid var(--line-2); border-radius: 10px; padding: 10px; cursor: pointer; }
+.st-choice:hover { border-color: var(--brass); }
+.st-choice.is-picked { border-color: var(--brass); background: rgba(var(--brass-rgb), 0.07); }
+.st-choice input { accent-color: var(--brass); }
+.st-choice__img { max-width: 100%; border-radius: 6px; background: #fff; }
+.st-choice__txt { font-size: 13px; }
+.st-choice__txt p { margin: 0; }
+.st-ans__fig { max-height: 64px; border-radius: 4px; border: 1px solid var(--line-2); background: #fff; vertical-align: middle; margin-right: 6px; }
+
+/* upload / review / editors */
+.st-panel { display: flex; flex-direction: column; gap: 12px; max-height: 86vh; overflow-y: auto; }
+.st-flabel { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--ink-dim); }
+.st-pedit { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--line); border-radius: 10px; padding: 10px; }
+.st-pedit__head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: var(--ink-faint); }
+.st-pedit__row { display: flex; gap: 8px; }
+.st-pedit__row .pw-field--select { flex: 1; }
+.st-tol { width: 76px; }
+.st-pedit__ans math-field.pw-mathfield { width: 100%; }
+.st-revlist { display: flex; flex-direction: column; gap: 10px; max-height: 50vh; overflow-y: auto; }
+.st-rev { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 10px; padding: 10px; cursor: pointer; }
+.st-rev input { accent-color: var(--brass); margin-top: 3px; }
+.st-rev__body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; font-size: 13px; }
+
+/* ==== Mobile pass =========================================================
+   Everything below is scoped under body.is-mobile (set by platform.js: native
+   iOS OR viewport < 820px) so the desktop layout stays pixel-identical. The
+   sidebar becomes an overlay drawer, the widget model collapses to a single
+   column, and the two master/detail plugins (Email, Calendar) fold to one pane.
+   Guarantee held throughout: no element may force the page to scroll sideways. */
+
+/* --- hamburger + drawer scrim (web layer injects #nav-toggle + .nav-scrim,
+       and toggles body.nav-open) --- */
+#nav-toggle { display: none; }
+body.is-mobile #nav-toggle {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; flex: none;
+  border: 1px solid var(--line-2); border-radius: 10px;
+  background: rgba(var(--ink-rgb), 0.03); color: var(--ink-dim); cursor: pointer;
+}
+body.is-mobile #nav-toggle:hover { color: var(--ink); background: rgba(var(--ink-rgb), 0.06); }
+body.is-mobile #nav-toggle svg { width: 20px; height: 20px; }
+
+.nav-scrim {
+  position: fixed; inset: 0; z-index: 90; /* just below the sidebar (100) */
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0; pointer-events: none; transition: opacity 0.2s;
+}
+body.nav-open .nav-scrim { opacity: 1; pointer-events: auto; }
+
+/* --- single-column shell: sidebar is an overlay, not a grid track --- */
+body.is-mobile .app { grid-template-columns: 1fr; }
+body.is-mobile .sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0;
+  width: min(84vw, 300px); z-index: 100; overflow: auto;
+  transform: translateX(-100%); transition: transform 0.2s;
+}
+body.is-mobile.nav-open .sidebar { transform: none; }
+
+/* Topbar layout (item 4): nav button top-left, crumb centered beside it on
+   row 1, title/tabs (.topbar__lead) forced onto row 2 full-width & left-aligned.
+   justify-content:flex-start (not space-between) keeps the crumb hugging the
+   button. Safe-area top/left (item 3) keeps the nav button clear of the notch. */
+body.is-mobile .topbar {
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px 12px;
+  padding: max(18px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 14px max(16px, env(safe-area-inset-left));
+}
+body.is-mobile .topbar > .crumb { margin: 0; }
+body.is-mobile .topbar__lead { flex: 1 0 100%; width: 100%; text-align: left; }
+body.is-mobile .title { font-size: 30px; }
+body.is-mobile .content { padding: 18px max(16px, env(safe-area-inset-right)) 18px max(16px, env(safe-area-inset-left)); }
+body.is-mobile .prow-title-input { max-width: 100%; }
+
+/* Safe-area insets (item 3): keep chrome clear of the notch / home indicator
+   under viewport-fit=cover. max() so the inset only ever grows the existing
+   padding, and these envs are 0 off-device — harmless on desktop. */
+body.is-mobile .sidebar__head { padding-top: max(36px, env(safe-area-inset-top)); padding-left: max(18px, env(safe-area-inset-left)); }
+body.is-mobile .sidebar__body { padding-left: max(18px, env(safe-area-inset-left)); }
+body.is-mobile .sidebar__foot { padding-bottom: max(18px, env(safe-area-inset-bottom)); padding-left: max(18px, env(safe-area-inset-left)); }
+
+/* --- widget model: never side by side --- */
+body.is-mobile .prow-body { flex-direction: column; gap: 12px; }
+body.is-mobile .pline { flex-direction: column; gap: 12px; }
+/* colHTML sets an inline flex-basis; override it so every column fills the row */
+body.is-mobile .pcol { flex: 1 1 auto !important; width: 100%; }
+/* the horizontal-drag handles no longer control anything in a forced column */
+body.is-mobile .pcol-resize,
+body.is-mobile .prow-hresize { display: none; }
+
+/* Customize drag grip: the desktop -28px side gutter falls in the content's
+   16px padding and gets clipped on a phone, so float a bigger, easy-to-grab
+   pill at the row's top-left corner instead (item 6). */
+body.is-mobile .prow-handle {
+  left: 0; top: 0; bottom: auto;
+  width: 40px; height: 34px;
+  background: rgba(var(--ink-rgb), 0.06);
+  font-size: 16px;
+  z-index: 4;
+}
+
+/* --- Email: master/detail → one pane --- */
+body.is-mobile .mail-body { position: relative; }
+/* nav shows via its existing toggle (removes .nav-hidden); as an overlay it
+   never squeezes the list into a sliver */
+body.is-mobile .mail-nav {
+  position: absolute; top: 0; left: 0; bottom: 0; z-index: 15;
+  width: min(80vw, 260px); background: var(--panel);
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.4);
+}
+body.is-mobile .mail-list { flex: 1 1 auto; min-width: 0; width: 100%; }
+body.is-mobile .mail-split { display: none; }
+body.is-mobile .mail-view { display: none; }
+body.is-mobile .mail-body.mail--view-open .mail-view { display: flex; width: 100%; }
+body.is-mobile .mail-body.mail--view-open .mail-list { display: none; }
+/* back button reuses .mail-btn--ghost (already styled); compose FAB: */
+body.is-mobile .mail-fab {
+  position: fixed; z-index: 80;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  width: 52px; height: 52px; border-radius: 50%; border: none; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brass); color: var(--on-accent);
+  box-shadow: 0 8px 24px -6px rgba(0, 0, 0, 0.5);
+}
+body.is-mobile .mail-fab svg { width: 22px; height: 22px; }
+
+/* --- Calendar: single pane --- */
+/* Toolbar (item 7): .cal-top is an unwrapped 7-child flex row (panel toggle,
+   Today, prev, next, date label, the M/W/D pills, New event) with no wrap —
+   at phone width it can't all fit and can't wrap, so the pills and New event
+   were shoved past the right edge and clipped by section.content. Let it wrap
+   to a second row, and make the label (whose text length varies a lot — the
+   day view spells out a full date) flex-grow to soak up whatever room is left
+   on row one, so it never leaves the pills a lucky gap to squeeze into: the
+   break before the pills lands in the same place no matter what the label
+   says. The old margin-left:auto on .cal-views only makes sense sharing a row
+   with New event, so it moves to New event itself for the wrapped layout. */
+body.is-mobile .cal-top { flex-wrap: wrap; }
+body.is-mobile .cal-top__label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+body.is-mobile .cal-views { margin-left: 0; }
+body.is-mobile .cal-top .mail-btn--primary { margin-left: auto; }
+body.is-mobile .cal-body { position: relative; }
+/* nav shows via its existing toggle (removes .nav-hidden), overlaid */
+body.is-mobile .cal-nav {
+  position: absolute; top: 0; left: 0; bottom: 0; z-index: 15;
+  width: min(80vw, 260px); background: var(--panel);
+  box-shadow: 0 0 40px rgba(0, 0, 0, 0.4);
+}
+/* Month/week/day all fit phone width now via the container-query shrink on
+   .cal-cell (month) and .cal-day-col (week/day) — no min-width scroll hack. A
+   narrower time gutter buys the day columns more room. */
+body.is-mobile .cal-grid { width: 100%; }
+body.is-mobile .cal-gutter { width: 42px; flex-basis: 42px; }
+
+/* --- Equations: full width (equation widgets stack via the .pcol rule) --- */
+body.is-mobile math-field.pw-mathfield,
+body.is-mobile .pw-mathfield { width: 100%; }
+/* On mobile .pline is a column, so its cross-axis is width. The hug list
+   (align-self:flex-start ~522) then shrink-wraps these widgets' WIDTH; stretch
+   them to span the full screen instead. Only the container stretches — the
+   equation glyphs (.eq-render / math-field font) keep their natural size. */
+body.is-mobile .pwidget--eqcard,
+body.is-mobile .pwidget--eqlist,
+body.is-mobile .pwidget--card,
+body.is-mobile .pwidget--list { align-self: stretch; }
+
+/* --- General polish --- */
+body.is-mobile .modal-overlay { padding: 12px; }
+body.is-mobile .modal { max-width: 96vw; max-height: 92vh; padding: 20px 18px; overflow: auto; }
+/* tap targets */
+body.is-mobile .action-btn,
+body.is-mobile .mail-btn { min-height: 40px; }
+/* Delete/close X's: 40px hit box on mobile (the broken-X root cause was a hit
+   area smaller than a fingertip). Scoped to mobile so desktop X's stay small. */
+body.is-mobile .pw-item-remove,
+body.is-mobile .pw-delete,
+body.is-mobile .st-tab__x,
+body.is-mobile .nt-chip__x { min-width: 40px; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; }
+/* Course tabs (Study, Flashcards). .st-tabs wraps BETWEEN tabs, but .st-tab is
+   white-space:nowrap with min-width:auto, so a single tab whose course name is
+   longer than the screen can neither wrap nor shrink — it ran to right=484 in a
+   375px viewport, taking its delete X with it, and the row doesn't scroll, so
+   that tab was simply unreachable. Cap the tab and ellipsize the NAME only, so
+   the X stays on screen and tappable. Desktop keeps full-length tab labels. */
+body.is-mobile .st-tab { max-width: 100%; min-width: 0; }
+body.is-mobile .st-tab__name { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+
+/* Settings rows stack on mobile so the action button never overlaps the
+   description text (side-by-side .set-row was colliding at phone width). */
+body.is-mobile .set-row { flex-direction: column; align-items: stretch; gap: 10px; }
+body.is-mobile .set-row__meta { width: 100%; }
+/* Gym cycle "add" row (workout picker + Add + Reset) has no wrap on desktop
+   because there's always room; on a phone the picker plus both buttons don't
+   fit one line and "Reset position" ran off the right edge. Put the picker on
+   its own line so the two buttons land together on the line below it. */
+body.is-mobile .gym-add-row { flex-wrap: wrap; }
+body.is-mobile .gym-add-row .gym-cycle-add-sel { flex: 1 1 100%; }
+/* Calendar cells: the @container(max-width) rules can't style .cal-cell itself
+   (an element isn't styled by its own container query), so tighten padding
+   directly on mobile, and narrow the week/day columns a touch. */
+body.is-mobile .cal-cell { padding: 2px; }
+body.is-mobile .cal-day-col { min-width: 0; }
+body.is-mobile .cal-gutter { width: 34px; }
+/* last line of defence against a sideways page scroll */
+body.is-mobile { overflow-x: hidden; }
+body.is-mobile img, body.is-mobile video { max-width: 100%; }
+
+/* The confirm-delete modal must layer ABOVE any open #app-modal (gym/chart/
+   calendar), which sits at z-index 60. It has its own id so it never removes
+   the modal underneath it. */
+.confirm-overlay { z-index: 90; }
+
+/* "No assignments yet." lines up with the assignment rows above it, which are
+   .cv-arow--btn (padding: 5px 6px) — the note had no left padding. */
+.cv-group .cal-wnote { padding-left: 6px; }
+
+/* Shift-history page size picker */
+.wk-per { margin-left: auto; font-size: 11.5px; padding: 2px 6px; }
+
+/* Study transcript scrolls vertically only — a long unbroken token (a URL, a
+   pasted equation) used to widen the pane and let the chat slide left/right. */
+.st-msgs { overflow-x: hidden; }
+.st-msg { overflow-wrap: anywhere; max-width: min(46rem, 100%); }
+.st-msg pre, .st-msg code { white-space: pre-wrap; word-break: break-word; }
+
+/* Ladder: a smaller delete keeps it off the event text, and the title reserves
+   room for it so a long name truncates instead of running underneath. */
+.lad-card__x { width: 16px; height: 16px; font-size: 11px; }
+.lad-card__title { padding-right: 20px; }
+body.is-mobile .lad-card__x { min-width: 22px; min-height: 22px; width: 22px; height: 22px; }
+body.is-mobile .lad-card__title { padding-right: 26px; }
+
+/* Mobile: the colour-scheme grid was a fixed 3 x 132px (~404px) — wider than a
+   phone, so the first column was cut off the left edge. Two fluid columns fit. */
+body.is-mobile .set-theme { align-items: stretch; }
+body.is-mobile .set-theme__row { justify-content: flex-start; }
+body.is-mobile .set-theme__presets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+/* Tabs keep desktop proportions on mobile (the 40px min-height bloated them);
+   still a comfortable tap target, and identical whether active or not. */
+body.is-mobile .page-tab { min-height: 34px; font-size: 12.5px; padding: 6px 14px; }
+body.is-mobile .page-tabs { flex-wrap: wrap; gap: 8px; }
+/* The widget delete sits on the widget's corner — a 40px circle there overhangs
+   into the neighbouring widget, so keep it modest and tuck it back in. */
+body.is-mobile .pw-delete { min-width: 30px; min-height: 30px; width: 30px; height: 30px; top: -6px; right: -6px; }
