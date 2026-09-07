@@ -3077,3 +3077,221 @@ it: I cannot change another lane's behaviour from here, and the token marker
 already contains the blast radius. Whoever runs next may want to make the
 40-minute figure explicit in the marker file itself, so a breaker can read the
 expiry instead of assuming one.
+
+# Pass 14 — the project becomes the unit of isolation, 2026-09-07 12:33 → 13:50
+
+Chancellor's restructure, not a defect hunt. Read pass 13 first. `Bridge` is a
+git repository now (root commit `f2b42d0`), so "commit nothing" no longer holds
+and this pass commits — five commits, no push, no remote.
+
+`/Applications/Bridge.app` untouched: mtime still `Sep 6 22:57:05 2026`, the
+same value passes 8–13 recorded. The running app (pid 82940, up since 10:15) was
+never signalled.
+
+## The model, as built
+
+A PROJECT owns a full set of agent CLONES. A clone is a real gateway session:
+
+    agent:<agentId>:bridge:<projectId>
+
+so `frontend-design` in Bridge and `frontend-design` in CalcNotes are two
+sessions alive at the same time sharing no state. `chat.send` creates a key on
+first use (PROTOCOL §11.1), so cloning needs no provisioning step and none is
+attempted — creating a project is exactly "write the roster", and each clone
+comes into being on the first turn delivered to it.
+
+Per project the tabs are `main` FIRST — which **is** the room, because an
+unpinged message in the room goes to that project's main clone, and giving them
+separate tabs would ask him to guess which one a reply landed in — then one tab
+per agent.
+
+Memory is two files per clone, and only one of them is private:
+
+    ~/.openclaw/workspace/memory/bridge/<projectId>/<agentId>.md   private
+    ~/.openclaw/workspace/memory/bridge/SHARED.md                  every clone
+
+The shared file is deliberate and is stated as such in the preamble and in
+Settings: isolation is about state and reach, not about ignorance. Bridge does
+not own either file's contents — the agents read and append with their own file
+tools, on the gateway host where they actually run. Bridge's whole part is
+naming the paths in the standing preamble, which is the only channel through
+which a clone could learn them. `SHARED.md` is seeded on the gateway with a
+format note and one entry.
+
+## Agents cannot create projects, at three doors
+
+He asked for this in code rather than by convention, and the reason is sitting
+in his own preference document: `p-shotempty` / "Empty Project" was a screenshot
+fixture that leaked in days ago, and "Diagnostics" was a gateway session group
+that became a sidebar project on sight. Neither was ever asked for.
+
+* **Door 1 — provenance.** `buildCategories` builds from `PREFS.projects` alone.
+  A gateway session group, and a session carrying a `category`, were the only
+  two paths anything on the wire ever had; both are gone. This is the
+  load-bearing one, and it is what removes "Diagnostics" — not a filter against
+  its name, but the absence of the mechanism that invented it.
+* **Door 2 — intent.** `PREFS.projects` is mutated only through `projectCreate`
+  and `projectRemove`, and both throw unless a DOM handler is on the stack.
+  Every gateway message is dispatched from `window.__bridgeEmit`, which never
+  sets the token, so a path reached from the wire cannot mutate the list even by
+  calling the mutators directly.
+* **Door 3 — the store.** `Prefs.sanitized` runs on every load and every save.
+  A project id this app could not have minted, a leaked fixture, a nameless
+  project: dropped before anything reaches disk.
+
+All three are asserted, and door 1 is asserted by emitting a `Diagnostics` group
+and a smuggled `category` and checking that no project appears.
+
+## Removing a project
+
+There was no control for it at all — the gap he named. There is one now, per
+row, two-step because removing a project drops its rooms with it. Hidden until
+the row is hovered or focused: a destructive control permanently beside a
+navigation target is one you eventually hit by accident.
+
+## The migration, proved on his real document
+
+His prefs.json was v1: tool tabs, `g-bridge` / `g-atlas` adopted from gateway
+groups, and the leaked fixture. During a smoke run the new binary migrated the
+real file, and this is what it produced:
+
+```
+version 2
+projects [('p-bridge','Bridge',9), ('p-atlas','Atlas',9)]
+toolTabs ABSENT
+inboxRead 15   (unchanged)
+```
+
+`p-shotempty` gone, ids renamed, rosters filled to the full nine-agent clone
+set, read marks preserved. **His originals were then restored from backup**, so
+the file on disk still matches what the OLD app running on his desk holds in
+memory. The migration will happen for real when he installs.
+
+`room.json` v1 is a single document whose keys (`agent:x:bridge`) do not name a
+project. There is no honest way to split it, so it is dropped with a log line
+rather than attributed to a project the conversation was not had in. That costs
+four messages; his file is backed up at `/tmp/fd14/room.json.before`.
+
+## Counts
+
+**248 PASS / 0 FAIL → 267 PASS / 0 FAIL, `smoke: all good`, exit 0.**
+Counted by assertion NAME per the standing caveat. 267 PASS lines, 266 unique
+names — the duplicate is still `a selected ping bubble IS an Atlas page-tab`,
+asserted twice under one name, exactly as pass 13 recorded.
+
+Roughly 30 assertions were removed with the roster picker they measured (the
+`picker@Npx` geometry sweep and the empty-project cap checks). A project holds a
+full clone set by definition, so a picker for deselecting agents was a control
+for making the invariant false; the geometry it guarded no longer exists. About
+50 were added.
+
+## Three fixture repairs, each of which was hiding a real signal
+
+1. **A render that throws is invisible here.** `renderAll` builds a view and
+   mounts it; if anything on that path throws, the DOM keeps the PREVIOUS view,
+   so every later check fails as "the element is missing" — true, and silent
+   about the cause. Five failures were one exception wearing five costumes: a
+   stale `PREFS.toolTabs` read left in `SettingsView`. There is now a global
+   error trap installed before the first fixture and asserted late, and it named
+   the file and line on the next run. **Keep it.**
+2. **`__focusReal` was focusing the room.** Tab zero carries a session key (the
+   project's main clone) but renders a room — no agent composer, no context
+   strip, no `S.draft`. Every send, refusal, settings and context assertion was
+   measuring the wrong pane. It skips `kind === 'room'` now.
+3. **Restoring Room's store must come AFTER restoring its projects.**
+   `setProjects` prunes: it drops the room of any project not in the list it is
+   given, which is what makes removing a project remove its transcript. Done the
+   other way round it deletes exactly the rooms the restore just put back. This
+   only showed up because the fixtures reach the native side for real — the
+   page's `reconcileRosters` saves, and BridgeApp's `prefs` case hands the
+   result straight to `setProjects`.
+
+## The fixtures write through to his real preference document
+
+Worth stating plainly for whoever runs next. `reconcileRosters` calls
+`savePrefs()`, which goes over the bridge to `case "prefs"`, which writes
+prefs.json and calls `Room.setProjects`. So a `--smoke` run now mutates his real
+prefs and rooms mid-run, next to a Bridge that is probably open and holding the
+same files. The suite restores prefs at the end; the isolation section no longer
+relies on that at all — it points `Prefs.directoryOverride` at a scratch
+directory for its whole duration and asserts his real `room.json` was **never
+opened**, rather than asserting it was put back.
+
+Both files were also backed up outside the suite before the first run
+(`/tmp/fd14/{prefs,room}.json.before`) and restored by hand afterwards. Verified
+by checksum.
+
+## VERIFIED — measured this pass, on this machine
+
+* **267 PASS / 0 FAIL, `smoke: all good`, exit 0** (`/tmp/fd14/smoke.log`),
+  including a live gateway handshake.
+* The v1 → v2 prefs migration, run by the shipping code against his real
+  document, output quoted above.
+* `swiftc -typecheck` clean, zero warnings, across all ten Swift files.
+* `./build.sh mac` exit 0; the Release bundle is fresh (`MacOS/Bridge` at
+  13:47:42) and its `dist/` carries the new page code (`projectCreate`,
+  `nav__rm-b` both present in the copied files).
+* Both configurations still have `dist` (7 entries each) after a Release build —
+  pass 13's scoped purge still holds.
+* `/Applications/Bridge.app` untouched; pid 82940 never signalled.
+* Build mutex held legitimately for all three runs. It was held by
+  `rationale-serial-99451` (a live Rationale UI test) for the first ~10 minutes;
+  age was ~7 minutes and an `xcodebuild` was running, so it was left alone.
+
+## ASSERTED — believed, not demonstrated
+
+* **No clone has actually been spoken to.** Every isolation claim is asserted
+  against Room's real routing functions and the real store, but no message has
+  been relayed into an `agent:<id>:bridge:<projectId>` session on the live
+  gateway, because that would spend turns in his projects. That the gateway
+  creates such a key on first `chat.send` rests on PROTOCOL §11.1, which was
+  verified for three-part keys, not four-part ones. **First thing to check
+  after installing.**
+* **The agents have not been told about their memory files by anything that
+  ran.** The paths are in the preamble and `SHARED.md` is seeded, but no clone
+  has received a preamble yet, for the same reason.
+* Pixel verification of the new sidebar. Still blocked on the node's
+  `file.fetch` allowlist, unchanged from pass 13.
+
+## Judgement calls he should overturn if he disagrees
+
+* **The TOOLS section and the Education tab are gone.** His sidebar spec said
+  "exactly: INBOX, PROJECTS" and named Room and the agent list as things that
+  must go; Tools was not mentioned either way. Read as "exactly". Education's
+  roster and note are dropped by the migration. If he wanted it kept, it is a
+  new project with a cloned agent set, not a revert.
+* **Only clone sessions appear.** A project's tabs are its room and its agents,
+  so the ~70 loose gateway sessions that belong to no clone — the dashboard
+  session, cron runs, ad-hoc spawns — are no longer anywhere in the sidebar.
+  Subagents spawned BY a clone still show as child cards under it. The Inbox
+  remains the cross-project view. This is the strict reading of the spec and it
+  is the change most likely to feel wrong in daily use.
+* **The roster picker was deleted rather than repurposed.** See above.
+* **Existing projects were back-filled to the full agent set.** "Each project
+  contains a full set of agents" was read as a property of all projects, not
+  only new ones, so Atlas went from a roster of one to nine.
+* **`main`'s tab is the room rather than a tenth tab beside it.**
+
+## State left behind
+
+* Five commits on `master`, nothing pushed. Tree is green at the last one; the
+  Swift and page halves are one protocol change and no single commit in the
+  middle builds green on its own.
+* `~/Library/Application Support/Bridge/{prefs,room}.json` — **his originals**,
+  restored by checksum. Backups at `/tmp/fd14/*.before`.
+* A fresh, **NOT installed** Release bundle at
+  `bridge-apple/build/Build/Products/Release/Bridge.app`.
+* `~/.openclaw/workspace/memory/bridge/SHARED.md` on the GATEWAY, seeded.
+* Logs: `/tmp/fd14/smoke.log` (267/0), `smoke_run1..5.log` (the 27 → 11 → 11 →
+  2 → 1 → 0 progression), `release.log`.
+* The `python3 -m http.server 18877` under Xcode's Python is **still running and
+  still not mine.** Four passes have now declined to touch it.
+
+## Not done, deliberately
+
+* Installing over the running app. That needs Bridge quit and that is his call.
+* PROTOCOL.md documents neither `idempotencyKey`-as-dedupe-key nor
+  `EMPTY_MESSAGE`, and now also does not document the four-part clone key.
+  Eight passes old for the first two.
+* The `onkeyup`/`onblur` audit pass 9 named. Six passes on.
+* The 760px transcript-floor-vs-composer decision. Still his.
