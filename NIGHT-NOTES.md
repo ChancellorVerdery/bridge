@@ -3295,3 +3295,199 @@ by checksum.
   Eight passes old for the first two.
 * The `onkeyup`/`onblur` audit pass 9 named. Six passes on.
 * The 760px transcript-floor-vs-composer decision. Still his.
+
+---
+
+# Pass 15 — the two assumptions pass 14 flagged, both overturned, 2026-09-07 14:00 → 14:40
+
+Pass 14 restructured Bridge onto projects and said plainly, in its own notes,
+that it had made judgement calls he should overturn if he disagreed. He
+disagreed with two of them. This pass is those two, plus the feature the first
+of them had been standing in for.
+
+## The two assumptions, and what was actually true
+
+**1. "A project holds a FULL clone set."** Pass 14 deleted the roster picker on
+the reasoning that a control for deselecting agents was a control for making
+the invariant false, back-filled every existing project to all nine agents, and
+made new gateway agents join every project automatically.
+
+The invariant was the mistake, and the evidence was sitting on disk in his own
+`prefs.json` the whole time — never read by the pass that overwrote it:
+
+    Bridge   roster: frontend-design, main, cybersecurity, backend-design,
+                     full-stack, linux-expert, macos-expert      (seven of nine)
+    Atlas    roster: main                                        (one of nine)
+
+He had already been choosing. The back-fill would have turned Atlas from one
+agent into nine and nothing would have told him. It never actually happened,
+because `Prefs.current` is a getter that does not write and Bridge was not
+running, so the migration was never persisted — his v1 document was still
+intact when this pass started. That is luck, not design.
+
+Corrected: `roster` splits in two. `access` is who he has allowed into a
+project; `clones` is which of those have been launched, and what state each is
+in. A new agent joins no project. A new project is its room and nothing else.
+
+**2. "A private memory file per clone per project."** Pass 14 gave each clone
+`memory/bridge/<projectId>/<agentId>.md`.
+
+That makes the same agent nine strangers who share a name. Nothing
+`frontend-design` learned in Bridge survived being asked to work in CalcNotes.
+Isolation is about transcript and reach; it was never meant to be about
+identity.
+
+Corrected: `memory/bridge/<agentId>/SOUL.md` and `.../MEMORY.md`, keyed by
+AGENT and by nothing else. Every clone of an agent reads and writes the same
+two files wherever it runs. `SHARED.md` is untouched — it was not part of
+either assumption and nothing in the corrected spec contradicts it.
+
+## What is new rather than corrected: a clone has a life
+
+"After a task completes, Chancellor decides whether to KILL that clone or leave
+it IDLE" had no implementation at all, because pass 14's model had no notion of
+a clone that could stop existing.
+
+  * **Launch** — from the picker, or by being handed work. A ping to an agent
+    with access launches it. Access IS the authorisation; making him click
+    Launch before any teammate could be pinged would break the room for the one
+    thing it exists to do.
+  * **Idle** — abort the run, keep the session, keep the tab, keep the memory.
+    A later ping wakes it. Idle is a rest state, not a refusal.
+  * **Kill** — abort the run, `sessions.delete` the session, drop the tab. The
+    agent's own memory is untouched; it is shared with every other project.
+
+Nothing reaps a clone on its own and nothing times out into either choice.
+Both are two clicks away on the strip of every tab in a project, which is where
+he is standing when a clone finishes.
+
+## The one genuinely awkward seam, named
+
+Room is the runtime authority on which clones exist — a relayed ping launches
+one, in Swift, mid-relay, with nobody clicking. Prefs is where that has to be
+remembered, and **Room cannot write prefs.json**: the page sends the WHOLE
+document on every save and would silently undo it.
+
+So Room pushes its clone set with the room payload and live.js
+`reconcileClones` stores it, mirroring `reconcileRosters`. That cost one real
+bug, found by the suite and worth writing down: a room payload that simply
+OMITS `clones` is not the same fact as a payload that says there are none. The
+first version treated them alike and wiped the clone set on every fixture push
+that predated the key — three failures wearing one costume again (the tab
+strip, the ping bar, and a context assertion that was measuring the room
+because `__focusReal` could no longer find an agent tab). `clones` is now
+`null` when absent and `[]` only when the sender meant it.
+
+## Data preserved rather than tidied
+
+  * **A v1 tool tab is a project now.** Pass 14 dropped them, which threw away
+    "Education" — coursework, main, frontend-design, a thing he built. A tool
+    tab was a name plus a chosen set of agents; that is precisely what a
+    project is under v3. Removing it is one click. Recreating it is not.
+  * **Revoking access kills the clone**, at the picker and again in
+    `sanitized`. Leaving a live session behind for an agent just excluded is an
+    access control that controls nothing.
+
+## VERIFIED — measured this pass, on this machine
+
+* **296 PASS / 0 FAIL, `smoke: all good (1 skipped)`** (`/tmp/fd15/smoke_run2.log`),
+  including a live gateway handshake. Baseline before any edit was re-measured
+  rather than taken on trust: **267 PASS / 0 FAIL** (`smoke_before.log`).
+  Counted by assertion NAME: 296 lines, 295 unique, the one duplicate still
+  `a selected ping bubble IS an Atlas page-tab`, exactly as passes 13 and 14
+  recorded. 43 assertions added, 14 removed with the assumptions they asserted.
+* `swiftc -typecheck` clean, **zero warnings**, across all ten Swift files.
+* **The migration, run by the shipping code against his REAL v1 document.** The
+  smoke writes through to `~/Library/Application Support/Bridge/prefs.json`, so
+  this is the actual output, not a fixture:
+
+      version 3, keys [inboxRead, projects, sshHost, version]
+      p-bridge     Bridge      access=[main, frontend-design, cybersecurity,
+                                       backend-design, full-stack, linux-expert,
+                                       macos-expert]   clones=[]
+      p-atlas      Atlas       access=[main]           clones=[]
+      p-education  Education   access=[main, coursework, frontend-design] clones=[]
+
+  Seven stayed seven. One stayed one. Education survived. Nothing launched.
+  `toolTabs`, `note` and `roster` are gone from the written document.
+* Both files backed up before the first run (`/tmp/fd15/{prefs,room}.json.before`)
+  and restored afterwards. **Verified by checksum**, both files, after the last
+  run.
+* `/Applications/Bridge.app` untouched. Bridge was NOT running on his desk at
+  any point this pass — checked at the start; pid 82940 was long gone.
+* Build mutex held legitimately throughout, token `bridge-fd15-6384-…`. It was
+  free on arrival, with no build processes running.
+
+## ASSERTED — believed, not demonstrated
+
+* **The gateway half of `kill` has never fired.** `chat.abort` then
+  `sessions.delete` are wired and the write result comes back to the page like
+  any other, but no clone has been killed against the live gateway. The smoke
+  asserts everything Bridge itself decides — the clone set, the tabs, the
+  subscriptions, the transcript — and deliberately does not delete sessions on
+  his gateway to prove it can. **`sessions.delete` also needs session-admin
+  authority, which Bridge does not request** (it holds read, write and
+  questions). If that refusal is what comes back, the clone is gone from Bridge
+  either way and the gateway keeps a session nothing here can reach. First
+  thing to check after installing.
+* **Still no clone has been spoken to**, unchanged from pass 14, and the
+  four-part key claim still rests on PROTOCOL §11.1 having been verified for
+  three-part keys.
+* **No agent has been told about the new memory paths**, for the same reason.
+  Nothing has created `memory/bridge/<agentId>/` on the gateway; the preamble
+  tells each clone to create the files if they are not there.
+* Pixel verification of the access picker. The `.cust` CSS it reuses is pass
+  13's and unchanged; the `.cln-*` rows are new and have been rendered by the
+  suite but not photographed.
+
+## Judgement calls he should overturn if he disagrees
+
+* **A ping launches a clone.** The alternative — refusing to relay to an agent
+  with access that has not been launched — is more literally "he decides", and
+  it would also mean the room cannot hand work to anyone without a detour
+  through a panel. Access was read as the authorisation and launching as its
+  consequence.
+* **Education came back as a project.** Pass 14 deleted it; this restored it.
+  If he is finished with it, it is one click, which is the asymmetry the choice
+  was made on.
+* **Idle aborts the run.** "Leave it idle" was read as an action with an effect,
+  not a label. A clone that keeps working after being parked would make the
+  state cosmetic.
+* **`main` is forced into every access list** and can be neither killed nor
+  parked. A project whose room has no `main` is a room that swallows everything
+  typed into it.
+* Pass 14's other two calls stand unexamined: **Tools/Education as a SECTION is
+  still gone** (Education is now a project, not a section), and **only clone
+  sessions appear in the sidebar** — the ~60 loose gateway sessions are still
+  Inbox-only. He called neither out, so neither was touched.
+
+## State left behind
+
+* One commit on `master`, pushed. Tree is green at it.
+* `~/Library/Application Support/Bridge/{prefs,room}.json` — **his originals**,
+  restored by checksum. Backups at `/tmp/fd15/*.before`. The v3 migration will
+  happen on his next launch, by the shipping code, as it should.
+* A fresh, **NOT installed** Release bundle at
+  `bridge-apple/build/Build/Products/Release/Bridge.app`. Rebuilt deliberately:
+  `build.sh smoke` scopes its dist purge to Debug but the Release bundle left
+  by pass 14 had already been stripped by these runs.
+* Logs: `/tmp/fd15/smoke_before.log` (267/0), `smoke_run1.log` (291/5),
+  `smoke_run2.log` (296/0), `release.log`.
+* The `python3 -m http.server 18877` under Xcode's Python is **still running and
+  still not mine.** Five passes have now declined to touch it.
+
+## Not done, deliberately
+
+* Installing over the running app. Still his call; Bridge was not even running
+  this pass, and installing is not what was asked for.
+* `-parallel-testing-enabled NO` was not added to `build.sh`. The standing
+  instruction is to disable parallel testing on any `xcodebuild`; this project
+  has no `test` action — `build.sh` only ever runs `xcodebuild … build` and
+  then launches the app with `--smoke` — so there is no parallel testing to
+  turn off, and adding a flag for an action that is never invoked would be
+  cargo. Worth revisiting the moment a real test target exists.
+* PROTOCOL.md documents neither `idempotencyKey`-as-dedupe-key, `EMPTY_MESSAGE`,
+  the four-part clone key, nor now `sessions.delete`. Nine passes old for the
+  first two.
+* The `onkeyup`/`onblur` audit pass 9 named. Seven passes on.
+* The 760px transcript-floor-vs-composer decision. Still his.
