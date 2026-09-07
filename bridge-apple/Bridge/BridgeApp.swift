@@ -178,6 +178,22 @@ final class Shell: ObservableObject {
             return
         }
 
+        // MIGRATE ONCE, AT LAUNCH, RATHER THAN LEAVING IT IMPLICIT.
+        //
+        // `Prefs.current` sanitises on read, so the app is correct either way —
+        // v1's tool tabs are gone, `g-` project ids are renamed, and a leaked
+        // screenshot fixture like `p-shotempty` is dropped. But until something
+        // saves, the FILE still says otherwise, and "the sidebar and prefs.json
+        // disagree" is the kind of state that costs an hour to diagnose later.
+        // Writing it here makes the upgrade a fact on disk at first launch.
+        if Prefs.needsMigration {
+            let migrated = Prefs.current
+            NSLog("bridge: migrating prefs to v\(Prefs.currentVersion) — "
+                  + "projects=\(migrated.projects.map { $0.id }.joined(separator: ","))")
+            _ = Prefs.save(migrated)
+        }
+        Room.shared.setProjects(Prefs.current.projects)
+
         if Keychain.token == nil { showSettings = true }
         // The running app can photograph itself on SIGUSR1. `screencapture -l`
         // needs a Screen Recording grant this machine has not given, and a
@@ -222,6 +238,23 @@ final class Shell: ObservableObject {
             // next launch.
             if p.sshHost != before.sshHost { Gateway.shared.reconnectNow() }
 
+            // THE PROJECT LIST CHANGED, SO THE SET OF CLONES CHANGED.
+            //
+            // `Prefs.current` is the SANITISED document — not `p` — which is the
+            // point: whatever the page sent, Room is told what was actually
+            // stored. A new project's clones get subscribed here rather than at
+            // the next reconnect, so its `main` tab is live immediately; a
+            // removed project's room is dropped inside `setProjects`.
+            let after = Prefs.current
+            if after.projects != before.projects {
+                Room.shared.setProjects(after.projects)
+                Gateway.shared.subscribeRoom(Room.shared.keys)
+                // The page's copy of the document is now stale in exactly the
+                // case that matters: it asked for something `sanitized` refused.
+                // Hand back what was really written.
+                if after.projects != p.projects { pushPrefs() }
+            }
+
         case "send":
             guard let key = body["sessionKey"] as? String, let text = body["text"] as? String else { return }
             Gateway.shared.sendMessage(sessionKey: key, text: text,
@@ -239,16 +272,26 @@ final class Shell: ObservableObject {
         // session key that means, whether the standing preamble is due, and what
         // goes into the shared transcript. Routing lives in one place.
 
+        // Every one of these now carries a PROJECT, because a room belongs to a
+        // project. A message with no project is dropped rather than routed to a
+        // default: guessing which room Chancellor meant is how a message ends up
+        // in the wrong project's transcript, which is the one thing isolation is
+        // supposed to make impossible.
+
         case "room.send":
-            guard let text = body["text"] as? String else { return }
+            guard let text = body["text"] as? String,
+                  let project = body["project"] as? String, !project.isEmpty else { return }
             let ping = body["ping"] as? String
-            Room.shared.fromChancellor(text: text, ping: (ping?.isEmpty ?? true) ? nil : ping)
+            Room.shared.fromChancellor(text: text, ping: (ping?.isEmpty ?? true) ? nil : ping,
+                                       project: project)
 
         case "room.pause":
-            Room.shared.setPaused(body["paused"] as? Bool ?? true)
+            guard let project = body["project"] as? String, !project.isEmpty else { return }
+            Room.shared.setPaused(body["paused"] as? Bool ?? true, project: project)
 
         case "room.clear":
-            Room.shared.clear()
+            guard let project = body["project"] as? String, !project.isEmpty else { return }
+            Room.shared.clear(project: project)
 
         case "question.resolve":
             // The answers map is keyed by the INNER questionId, not the record
