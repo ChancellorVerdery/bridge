@@ -3579,3 +3579,53 @@ something smoke does itself. Until smoke is fixed to wrap every prefs emit in a
 directoryOverride, back up `~/Library/Application Support/Bridge/prefs.json`
 before running smoke and restore it after. Normal launches do not do this — only
 smoke.
+
+# Pass 19 — the terminal reskin, matching the design artifact, 2026-09-08
+
+Chancellor: "you dont have the tabs correct like they are in the artifact" +
+"double check the entire artifact design there are things missing." The app had
+the functional changes but still wore its old Atlas look; the artifact redesign
+had never been built in. Confirmed scope with him (full match), then implemented.
+
+## What changed (app.css + app.js + live.js)
+
+* MONOSPACE everywhere (IBM Plex Mono), the brand mark the one serif exception —
+  its own atlas.css rule still wins. One `body` override in app.css.
+* FOLDER/BROWSER TABS, not pills: `.page-tabs`/`.page-tab` overridden to
+  top-rounded rectangles on a baseline, active one filled, nowrap + overflow-x
+  auto (scrolls horizontally, never wraps/clips).
+* TABS ARE "Main" + EVERY ACCESS AGENT, not just launched clones. `cloneTabs`
+  now iterates `access` (a launched agent shows its session, an access-only one
+  a placeholder tab); PageTabs labels the room tab "Main".
+* NO INBOX in the sidebar — navigator is Projects + Tools only. The inbox view
+  still exists in code but is unlinked (so agent questions no longer surface in
+  the sidebar; a known consequence of the removal Chancellor asked for).
+* A ">" prompt on the composer (`.compose-box::before`).
+* @ and / TYPE-AHEAD POPOVERS in the room composer, reusing the agent pane's
+  `.pal` palette: typing @ lists this project's agents (click inserts @id),
+  typing / lists the commands. renderAll-on-input is safe — captureUi/restoreUi
+  keep the caret. roomSend already routes @ to the agent and sends /commands to
+  main, which the gateway interprets.
+
+## Verified
+
+* `build.sh smoke` — all good (1 skipped). Six assertions were updated to the
+  new truth (room tab labelled "Main"; no Inbox / no sidebar unread badge;
+  folder tabs are one row that scrolls horizontally via overflow-x:auto; a
+  pending question shows its expiry instead of a sidebar unread count). The
+  monospace switch did NOT disturb the transcript-floor geometry — those checks
+  (footNatural-relative) still pass.
+* `--shot --view room` and `--view roomat`: reviewed. Folder tabs read
+  "Main | Frontend Design | Cybersecurity | …" for Bridge; the @ popover opens
+  with the project's agents; mono throughout; brand serif; no Inbox.
+* Release built, installed to /Applications, relaunched (pid confirmed), all
+  three projects intact.
+
+## The prefs hazard bit again, and how
+
+`--shot` snapshots+restores prefs, and running it WHILE the app is open races
+the app's own writes and corrupted the project list twice this pass (dropped to
+Education-only, then Atlas+Education). Same root as pass 18's smoke hazard: the
+prefs handler always saves the real store. Rule reinforced: quit the app before
+`--shot`, and keep a known-good prefs backup (this pass kept one at
+tmp/prefs-good.json). Projects were restored to Bridge/Atlas/Education each time.

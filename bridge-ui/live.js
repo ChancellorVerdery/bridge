@@ -992,23 +992,36 @@ function roomTabFor(proj) {
 
    A clone that HAS been launched but whose session has not been created yet — no
    turn has been delivered — still gets a tab, because it is a thing he did. */
+/* ONE TAB PER AGENT WITH ACCESS — "Main, then each available agent", the design
+   artifact's tab row. Drawn from `access`, not `clones`: a launched clone shows
+   its real session and state; one that is allowed in but not launched shows a
+   placeholder tab whose pane says so and how to start it (a ping from the room
+   or the access picker launches it). `main` is excluded because its tab is the
+   room, prepended separately. */
 function cloneTabs(proj, rows) {
   const out = [];
-  for (const c of clonesOf(proj)) {
-    const id = c.id;
+  const clones = clonesOf(proj);
+  const launchedState = (id) => {
+    const c = clones.find((x) => x.id === id);
+    return c ? (c.state === 'idle' ? 'idle' : 'active') : null;   // null = access-only
+  };
+  for (const id of accessOf(proj)) {
+    if (id === 'main') continue;                                   // main's tab IS the room
     const key = cloneKey(id, proj.id);
     const row = rows.get(key);
-    const state = c.state === 'idle' ? 'idle' : 'active';
-    if (row) { const a = agentFor(row); a.cloneState = state; out.push(a); continue; }
-    const ph = placeholderAgent(id, proj.id, 'No session for this agent in ' + proj.name + ' yet.');
-    ph.cloneState = state;
-    ph.plan = { purpose: agentLabel(id) + ' is launched in ' + proj.name + ' and has not been '
-      + 'spoken to yet. It is a real, separate clone: its session key is '
-      + cloneKey(id, proj.id) + ', and the same agent working in another project is a different '
-      + 'session with a different transcript. Its SOUL.md and MEMORY.md are NOT separate — every '
-      + 'clone of ' + id + ' reads and writes the same two files, so what it learned elsewhere it '
-      + 'knows here. Ping @' + id + ' from the room, or type below, and the session is created on '
-      + 'the first message.' };
+    const state = launchedState(id);
+    if (row) { const a = agentFor(row); a.cloneState = state || 'active'; out.push(a); continue; }
+    const ph = placeholderAgent(id, proj.id,
+      state ? 'No session for this agent in ' + proj.name + ' yet.'
+            : agentLabel(id) + ' has access to ' + proj.name + ' but has not been launched yet.');
+    ph.cloneState = state;                                         // null when allowed-in, not launched
+    ph.plan = { purpose: agentLabel(id) + (state ? ' is launched in ' : ' has access to ') + proj.name
+      + (state ? ' and has not been spoken to yet.' : ' and has not been launched yet.')
+      + ' It is a real, separate clone: its session key is ' + cloneKey(id, proj.id) + ', and the '
+      + 'same agent in another project is a different session with a different transcript. Its '
+      + 'SOUL.md and MEMORY.md are NOT separate — every clone of ' + id + ' reads and writes the '
+      + 'same two files. Ping @' + id + ' from the room, or launch it from the access picker, and '
+      + 'the session is created on the first message.' };
     out.push(ph);
   }
   return out;

@@ -443,22 +443,9 @@ function Nav() {
      say something false about what it is. The unread count rides on the sidebar
      item itself — Atlas already has .plug-badge for exactly this, and the nav
      rules already position it. */
-  const unread = typeof inboxUnread === 'function' ? inboxUnread() : 0;
-  nav.append(h('div.nav__sec',
-    h('a.nav__item', {
-      class: S.view === 'inbox' ? 'is-active' : '',
-      href: '#/inbox',
-      'aria-current': S.view === 'inbox' ? 'true' : 'false',
-      title: unread ? unread + ' unread' : 'Completions and questions',
-      onclick: (ev) => { ev.preventDefault(); openInbox(); },
-    },
-      h('span.mc-ico', { html: ICONS.inbox }),
-      h('span.nav__col',
-        h('span.nav__row',
-          h('span.nav__label', 'Inbox'),
-          unread ? h('span.plug-badge.nav__unread', unread) : null),
-        h('span.nav__sub', inboxSub())),
-      h('span.nav__dot'))));
+  /* NO INBOX in the sidebar. The redesign's navigator is Projects and Tools
+     only (design artifact + Chancellor's spec). The inbox view still exists in
+     code but is no longer linked from the sidebar. */
   /* THERE IS NO "ROOM" ENTRY HERE, and that is the point of this pass. A room
      belongs to a PROJECT now — it is that project's first tab — so a single
      global Room in the sidebar would be a link to a conversation that no longer
@@ -666,7 +653,7 @@ function PageTabs(c) {
       onclick: (ev) => { ev.preventDefault(); selectTab(a.id); },
     },
       TabMark(a.status, stale),
-      laneName(a),
+      a.kind === 'room' ? 'Main' : laneName(a),
       strip.list.length ? h('span.tab-kids', strip.list.length) : null));
   }
   // The strip is capped at two rows (see .page-tabs in app.css), so on a
@@ -1425,18 +1412,47 @@ function RoomFoot(cat) {
       : running ? 'Thuban is mid-turn — an unaddressed message will queue'
       : 'no active turn — a message starts one')));
 
-  /* 2 — the input. No ping buttons: address an agent by typing @<agent>. */
+  /* 2 — the input. No ping buttons: you address an agent by typing @<agent>,
+     and both @ and / open a live type-ahead list — the same palette the agent
+     pane uses. renderAll on input is safe (captureUi/restoreUi keep the caret)
+     and is what filters the list as you type. Typing @ lists this project's
+     agents; typing / lists the commands. */
+  const draft = S.roomDraft || '';
+  const cmdMode = draft.startsWith('/');
+  const atMatch = /(?:^|\s)@([a-z0-9-]*)$/i.exec(draft);      // an @token being typed at the end
+  const roomAccess = (roomOf(cat.id).access && roomOf(cat.id).access.length)
+    ? roomOf(cat.id).access : (cat.access || []);
+
+  if (cmdMode) {
+    const hits = matchCommands(draft);
+    const pal = h('div.pal', { 'data-enter': 'pal:room' });
+    if (!hits.length) pal.append(h('div.pal-none', 'No command matches — this prototype implements seven.'));
+    hits.forEach((cmd) => pal.append(h('button.pal-i', {
+      onclick: () => { S.roomDraft = cmd.name + (cmd.args ? ' ' : ''); renderAll(); },
+    }, h('b', cmd.name + (cmd.args ? ' ' + cmd.args : '')), h('span', cmd.desc))));
+    box.append(h('div.pal-slot', pal));
+  } else if (atMatch) {
+    const q = atMatch[1].toLowerCase();
+    const hits = roomAccess.filter((id) => id.toLowerCase().startsWith(q));
+    const pal = h('div.pal', { 'data-enter': 'pal:room-at' });
+    if (!hits.length) pal.append(h('div.pal-none', 'No agent in ' + cat.name + ' matches @' + q + '.'));
+    hits.forEach((id) => pal.append(h('button.pal-i', {
+      onclick: () => { S.roomDraft = draft.replace(/@[a-z0-9-]*$/i, '@' + id + ' '); renderAll(); },
+    }, h('b', '@' + id), h('span', id === 'main' ? 'Thuban — the unaddressed default' : agentLabel(id)))));
+    box.append(h('div.pal-slot', pal));
+  }
+
   const ta = h('textarea.ta', {
-    id: 'cmd-main', rows: 1, value: S.roomDraft || '',
-    placeholder: 'Message ' + cat.name + ' — type @agent to address one, hold space to talk…',
-    oninput: (ev) => { S.roomDraft = ev.target.value; if (voiceAck('__room__')) renderAll(); },
+    id: 'cmd-main', rows: 1, value: draft,
+    placeholder: 'Message ' + cat.name + ' — type @agent to address one, / for a command, hold space to talk…',
+    oninput: (ev) => { S.roomDraft = ev.target.value; voiceAck('__room__'); renderAll(); },
     onkeydown: (ev) => onRoomKey(ev, cat),
     onkeyup: (ev) => { if (ev.key === ' ') voiceStop(); },
     onblur: () => { if (VOICE.requestId) voiceStop(); },
   });
-  box.append(h('div.compose-box', { 'data-cmd': '0', 'data-off': '0' },
+  box.append(h('div.compose-box', { 'data-cmd': cmdMode ? '1' : '0', 'data-off': '0' },
     ta,
-    h('button.send', { onclick: () => roomSend(cat.id) }, running ? 'queue' : 'send')));
+    h('button.send', { onclick: () => roomSend(cat.id) }, cmdMode ? 'run' : running ? 'queue' : 'send')));
 
   const v = VoiceState('__room__');
   if (v) box.append(v);

@@ -250,8 +250,8 @@ enum Smoke {
             "[...document.querySelectorAll('.page-tab')].map(t => t.textContent).join(' | ')")) as? String ?? ""
         check("the session is drawn as a tab, labelled by its gateway label",
               tabText.contains("Smoke session"), "tabs=\(tabText)")
-        check("and the project's room is the tab before it",
-              tabText.hasPrefix("Smoke · room"), "tabs=\(tabText)")
+        check("and the project's room is the first tab, labelled Main",
+              tabText.hasPrefix("Main"), "tabs=\(tabText)")
         let txt = (try? await web.evaluateJavaScript(
             "document.querySelector('.tx') ? document.querySelector('.tx').textContent : ''")) as? String ?? ""
         check("the transcript renders both messages", txt.contains("hello") && txt.contains("hi"))
@@ -639,7 +639,8 @@ enum Smoke {
         """)) as? String ?? "{}"
         let D = (try? JSONSerialization.jsonObject(with: Data(ibxDom.utf8))) as? [String: Any] ?? [:]
         check("the inbox draws its entries", (D["rows"] as? Int ?? 0) == 3, ibxDom)
-        check("the unread count is on the sidebar item", (D["badge"] as? String ?? "") == "2", ibxDom)
+        check("there is no unread badge in the sidebar — the Inbox link was removed",
+              (D["badge"] as? String ?? "x") == "", ibxDom)
         check("the empty question state explains itself", (D["why"] as? Bool ?? false), ibxDom)
         // The honesty constraint, as an assertion: no question entry may exist,
         // because no question event can arrive on an operator.read connection.
@@ -1046,8 +1047,8 @@ enum Smoke {
               sbHeads.contains("Tools") && sbHeads != ["Tools"], sidebar)
         check("every category in the sidebar is a project",
               (SB["kinds"] as? [String] ?? []) == ["project"], sidebar)
-        check("the Inbox is above the sections rather than inside one",
-              sbLabels.first == "Inbox", sidebar)
+        check("there is no Inbox in the sidebar — Projects and Tools only",
+              !sbLabels.contains("Inbox"), sidebar)
 
         // ADD AND REMOVE. There was no way to remove a project at all — the gap
         // he called out — so the control's existence is asserted, not just its
@@ -1327,6 +1328,7 @@ enum Smoke {
             return JSON.stringify({ tabs: el?el.children.length:0,
               stripH: el?Math.round(el.getBoundingClientRect().height):-1,
               stripScrolls: el?el.scrollHeight>el.clientHeight+2:false,
+              overflowXStyle: el?getComputedStyle(el).overflowX:'',
               activeVisible: (function(){
                 if(!act||!el) return false;
                 const a=act.getBoundingClientRect(), e=el.getBoundingClientRect();
@@ -1341,9 +1343,9 @@ enum Smoke {
               (SP["tabs"] as? Int ?? 0) >= 16, strip)
         check("many tabs: and they are the project's clone set, room included",
               (SP["tabs"] as? Int ?? 0) == 17, strip)
-        check("many tabs: the strip is capped at two rows", (SP["stripH"] as? Int ?? 999) <= 70, strip)
-        check("many tabs: and it scrolls rather than being clipped",
-              (SP["stripScrolls"] as? Bool) == true, strip)
+        check("many tabs: the folder-tab strip stays a single row", (SP["stripH"] as? Int ?? 999) <= 45, strip)
+        check("many tabs: the strip scrolls horizontally rather than clipping or wrapping",
+              (SP["overflowXStyle"] as? String) == "auto", strip)
         // A cap that can hide the tab you are on is worse than the unbounded
         // strip it replaced, so this half is not optional.
         check("many tabs: the active tab is still visible inside the cap",
@@ -2032,7 +2034,7 @@ enum Smoke {
               (QD["buttons"] as? [String] ?? []) == ["SQLite", "JSON"], qDom)
         check("an isOther question also offers a free-text answer",
               (QD["freeText"] as? Int ?? 0) == 1, qDom)
-        check("a pending question counts as unread", (QD["unread"] as? String ?? "") != "0", qDom)
+        check("a pending question shows its expiry", (QD["text"] as? String ?? "").contains("expires in"), qDom)
         check("the Phase B 'no question can arrive' panel is gone once one has",
               !(QD["why"] as? Bool ?? true), qDom)
         check("the question states what it is asking",
@@ -2577,6 +2579,17 @@ enum Smoke {
         "inbox": "openInbox(); true",
 
         "settings": "openSettings(); true",
+
+        // The room with an "@" typed, so the agent type-ahead popover is open.
+        // In-memory only: it sets S.roomDraft and re-renders, writing nothing.
+        "roomat": """
+          (function(){
+            const c = CATEGORIES[0]; if (!c) return false;
+            S.view = 'sessions'; S.catId = c.id; S.tab[c.id] = c.id + '::room'; S.sub = null;
+            S.roomDraft = '@'; renderAll();
+            return true;
+          })()
+        """,
 
         // The Tools section and a tool's blank page. The demo tool is pushed
         // into the IN-MEMORY mirror only — no savePrefs, so nothing is written

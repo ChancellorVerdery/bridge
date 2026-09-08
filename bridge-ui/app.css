@@ -1700,3 +1700,59 @@ body[data-split="1"] .p-use > span:not(:last-child)::after { margin: 0 7px; }
 .cln-k[data-danger], .cln-k:hover { border-color: rgba(var(--neg-rgb), 0.5); color: var(--neg); }
 /* The strip's way in to the picker sits hard right, past the strip's own note. */
 .strip-ag { margin-left: 7px; }
+
+/* ══ REDESIGN — the terminal look ═══════════════════════════════════════════
+   Implements the approved design artifact. The colours are already Atlas's
+   tokens; what changes is typography (one monospace face, the brand mark the
+   serif exception), folder tabs in place of pills, and a ">" prompt on the
+   composer. This block loads after atlas.css, so it wins at equal specificity. */
+
+/* One monospace face everywhere. .brand__name keeps Instrument Serif — its own
+   rule in atlas.css is more specific and still wins. */
+body {
+  font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: -0.15px;
+}
+
+/* Folder / browser tabs, not pills: top-rounded rectangles on one baseline, the
+   active one filled and sitting flush on the line. */
+.page-tabs {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-height: none;
+  align-items: flex-end;
+  gap: 3px;
+  margin-top: 16px;
+  padding-left: 2px;
+  border-bottom: 1px solid var(--line-2);
+}
+.page-tabs::-webkit-scrollbar { height: 0; }
+.page-tab {
+  border-radius: 7px 7px 0 0;
+  border: 1px solid var(--line-2);
+  border-bottom: none;
+  background: color-mix(in srgb, var(--panel) 45%, transparent);
+  color: var(--ink-dim);
+  padding: 7px 14px 8px;
+  margin-bottom: -1px;
+  font-size: 12px;
+}
+.page-tab:hover { background: color-mix(in srgb, var(--panel) 75%, transparent); color: var(--ink); }
+.page-tab.is-active {
+  color: var(--ink);
+  background: var(--panel);
+  border-color: var(--line-2);
+}
+.page-tab.is-active .tick { color: var(--brass); }
+
+/* The ">" prompt: the composer reads as a terminal line. */
+.compose-box::before {
+  content: ">";
+  align-self: flex-start;
+  color: var(--brass);
+  font-weight: 600;
+  padding: 13px 0 0 12px;
+  flex: none;
+  line-height: 1;
+}
