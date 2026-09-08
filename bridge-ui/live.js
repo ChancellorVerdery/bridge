@@ -65,14 +65,14 @@ const LIVE = {
    first paint that races the load cannot overwrite last week's projects with
    this second's blanks. */
 
-const PREFS = { loaded: false, version: 3, sshHost: 'atlas', projects: [], inboxRead: [] };
+const PREFS = { loaded: false, version: 3, sshHost: 'atlas', projects: [], tools: [], inboxRead: [] };
 
 function savePrefs() {
   if (!PREFS.loaded) return;            // never write back what was never read
   if (typeof window === 'undefined' || !window.__bridgeSend) return;
   window.__bridgeSend({ t: 'prefs', prefs: {
     version: PREFS.version, sshHost: PREFS.sshHost,
-    projects: PREFS.projects, inboxRead: PREFS.inboxRead,
+    projects: PREFS.projects, tools: PREFS.tools, inboxRead: PREFS.inboxRead,
   } });
 }
 
@@ -234,6 +234,38 @@ function projectRemove(id) {
   const i = PREFS.projects.findIndex((p) => p.id === id);
   if (i < 0) return false;
   PREFS.projects.splice(i, 1);
+  savePrefs();
+  return true;
+}
+
+/* CUSTOM TOOLS. A tool is not a project — it is a single-agent AI utility, and
+   for now it is only a name that opens a blank page. It lives behind the same
+   user-intent gate as a project, and mints a `t-<slug>` id in the shape
+   Prefs.isValidToolID accepts, so tool and project ids never collide. */
+function newToolId(name) {
+  const base = 't-' + projectSlug(name);
+  const taken = new Set(PREFS.tools.map((t) => t.id));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(base + '-' + n)) n += 1;
+  return base + '-' + n;
+}
+
+function toolCreate(name) {
+  requireUserIntent('create a tool');
+  const clean = String(name || '').trim();
+  if (!clean) return null;
+  const id = newToolId(clean);
+  PREFS.tools.push({ id, name: clean });
+  savePrefs();
+  return id;
+}
+
+function toolRemove(id) {
+  requireUserIntent('remove a tool');
+  const i = PREFS.tools.findIndex((t) => t.id === id);
+  if (i < 0) return false;
+  PREFS.tools.splice(i, 1);
   savePrefs();
   return true;
 }
@@ -1359,6 +1391,7 @@ window.__bridgeEmit = function (msg) {
         // renamed, leaked screenshot fixtures purged — so the page takes what
         // was actually STORED rather than what it last sent.
         PREFS.projects = Array.isArray(p.projects) ? p.projects : [];
+        PREFS.tools = Array.isArray(p.tools) ? p.tools : [];
         PREFS.inboxRead = Array.isArray(p.inboxRead) ? p.inboxRead : [];
         PREFS.loaded = true;
         LIVE.prefsPath = msg.path || '';

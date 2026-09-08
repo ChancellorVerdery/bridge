@@ -561,6 +561,57 @@ function Nav() {
     }
     nav.append(box);
   }
+
+  /* TOOLS — a second section below Projects. A tool is NOT a project: it is a
+     single-agent utility that, for now, opens a blank page. Its own section,
+     its own create/remove, so the sidebar says plainly that the two are
+     different kinds of thing. Tool ids are `t-…`, project ids `p-…`, so a
+     shared S.removing / S.adding never confuses one for the other. */
+  const toolBox = h('div.nav__sec', h('p.nav__head', { 'data-enter': 'navhead:Tools' }, 'Tools'));
+  for (const t of (typeof PREFS !== 'undefined' ? PREFS.tools : [])) {
+    const active = S.view === 'tool' && S.toolId === t.id;
+    toolBox.append(h('div.nav__wrap',
+      h('a.nav__item', {
+        class: active ? 'is-active' : '',
+        href: '#/tool/' + t.id,
+        'aria-current': active ? 'true' : 'false',
+        onclick: (ev) => { ev.preventDefault(); openTool(t.id); },
+      },
+        h('span.mc-ico', { html: ICONS.work }),
+        h('span.nav__col',
+          h('span.nav__row', h('span.nav__label', t.name)),
+          h('span.nav__sub', 'tool · blank for now')),
+        h('span.nav__dot')),
+      S.removing === t.id
+        ? h('div.nav__rm',
+            h('span', 'Remove ' + t.name + '?'),
+            h('button.add-go', { onclick: fromUser(() => { removeTool(t.id); }) }, 'Remove'),
+            h('button.add-x', { onclick: () => { S.removing = null; renderAll(); } }, '×'))
+        : h('button.nav__rm-b', {
+            title: 'Remove ' + t.name,
+            'aria-label': 'Remove ' + t.name,
+            onclick: (ev) => { ev.preventDefault(); S.removing = t.id; renderAll(); },
+          }, '×')));
+  }
+  if (S.adding === 'tool') {
+    const input = h('input.add-in', {
+      value: S.newName, autofocus: true,
+      placeholder: 'Tool name…',
+      oninput: (ev) => { S.newName = ev.target.value; },
+      onkeydown: fromUser((ev) => {
+        if (ev.key === 'Enter') { ev.preventDefault(); commitAdd(); }
+        if (ev.key === 'Escape') { S.adding = null; S.newName = ''; renderAll(); }
+      }),
+    });
+    toolBox.append(h('div.add-row', input,
+      h('button.add-go', { onclick: fromUser(() => commitAdd()) }, 'Add'),
+      h('button.add-x', { onclick: () => { S.adding = null; S.newName = ''; renderAll(); } }, '×')));
+  } else {
+    toolBox.append(h('button.nav__add', {
+      onclick: () => { S.adding = 'tool'; S.newName = ''; renderAll(); },
+    }, h('span', '+'), 'New tool'));
+  }
+  nav.append(toolBox);
 }
 
 /* The line under "Inbox". It reports the real shape of the feed rather than a
@@ -2081,7 +2132,17 @@ function toggleAccess(c, agentId) {
    which is exactly what the old picker-less flow produced. */
 function commitAdd() {
   const name = (S.newName || '').trim();
+  const kind = S.adding;         // 'project' (from NAV_SECTIONS) or 'tool'
   if (!name) { S.adding = null; renderAll(); return; }
+  // A TOOL is not a project: create it and open its (blank) page. No room, no
+  // clones, no picker — a tool is one agent and one page.
+  if (kind === 'tool') {
+    const id = toolCreate(name);
+    S.adding = null; S.newName = '';
+    if (!id) { renderAll(); return; }
+    openTool(id);
+    return;
+  }
   const id = projectCreate(name);
   S.adding = null; S.newName = '';
   if (!id) { renderAll(); return; }
@@ -2110,6 +2171,13 @@ function removeProject(id) {
 
 function openInbox() { S.view = 'inbox'; S.removing = null; S.access = null; renderAll(); }
 function openSettings() { S.view = 'settings'; S.removing = null; S.access = null; renderAll(); }
+function openTool(id) { S.view = 'tool'; S.toolId = id; S.removing = null; S.access = null; renderAll(); }
+function removeTool(id) {
+  if (!toolRemove(id)) { S.removing = null; renderAll(); return; }
+  S.removing = null;
+  if (S.view === 'tool' && S.toolId === id) { S.view = 'sessions'; S.toolId = null; }
+  renderAll();
+}
 
 /* ───────────────────────── render ───────────────────────── */
 
@@ -2128,6 +2196,14 @@ function renderAll() {
   }
   if (S.view === 'settings') {
     return renderShellView('Settings', 'Connection, token, scopes and preferences', SettingsView(), keep);
+  }
+  // A tool is a view like Inbox and Settings, not a category — it has no
+  // sessions, so it must not go through the category path below. If its tool
+  // was removed out from under it, fall back to the projects view.
+  if (S.view === 'tool') {
+    const tool = (typeof PREFS !== 'undefined' ? PREFS.tools : []).find((t) => t.id === S.toolId);
+    if (tool) return renderToolView(tool, keep);
+    S.view = 'sessions'; S.toolId = null;
   }
 
   const c = category();
@@ -2190,6 +2266,22 @@ function renderAll() {
 
 /* Inbox and Settings share the shell: same sidebar, same topbar, one content
    block. Written once so the two cannot drift apart from the sessions view. */
+/* A tool's page. Deliberately BLANK for now: a tool will become a single-agent
+   surface, but until that agent is built the honest thing to show is an empty
+   page that says what it is and what is coming — not a fake transcript or a
+   borrowed project room. It sits in the same chrome as Inbox and Settings. */
+function renderToolView(tool, keep) {
+  return renderShellView(tool.name, 'Custom tool — nothing here yet', h('div.work',
+    h('div.empty-cat', { 'data-enter': 'tool:' + tool.id },
+      h('b', tool.name + ' is a blank tool.'),
+      h('p', 'Tools are single-agent AI utilities you build — a study helper, a prelab writer. '
+        + 'This one has no page yet: it is a placeholder you named so it holds its spot in the '
+        + 'sidebar.'),
+      h('p.empty-cat-w', h('b', 'Coming next: '),
+        'one agent behind this page, run from here — not the team-of-agents room a project is.'))),
+    keep);
+}
+
 function renderShellView(title, sub, body, keep, tabs) {
   Nav();
   SidebarFoot();

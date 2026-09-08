@@ -69,6 +69,10 @@ struct Prefs: Codable, Equatable {
     /// The projects Chancellor made. The unit of isolation, and the only thing
     /// the sidebar's PROJECTS section is built from.
     var projects: [Project] = []
+    /// Custom tools Chancellor builds — see `Tool`. A separate list from
+    /// `projects` because a tool is not a project: one agent and one page, not
+    /// a multi-agent room.
+    var tools: [Tool] = []
     /// Inbox entries the user has opened, by task id. Read state is Bridge's
     /// own: the gateway has no notion of "Chancellor has looked at this".
     var inboxRead: [String] = []
@@ -166,11 +170,21 @@ struct Prefs: Codable, Equatable {
         }
     }
 
+    /// A custom tool Chancellor builds: a study helper, a prelab writer. NOT a
+    /// project — a tool is one agent and one page, not a multi-agent room. For
+    /// now it is a name and an id that opens a blank page; the single backing
+    /// agent comes later. Synthesised Codable is enough — unlike Project it
+    /// carries no legacy keys to migrate.
+    struct Tool: Codable, Equatable, Identifiable {
+        var id: String
+        var name: String
+    }
+
     /// `toolTabs` is DECODE-ONLY: read from a v1 document so its tabs can become
     /// projects, and never written back, so an upgraded file stops carrying it.
     /// `projects`, `sshHost`, `inboxRead` and `version` are the whole of v3.
     enum CodingKeys: String, CodingKey {
-        case version, sshHost, projects, inboxRead, toolTabs
+        case version, sshHost, projects, tools, inboxRead, toolTabs
     }
 
     func encode(to encoder: Encoder) throws {
@@ -178,6 +192,7 @@ struct Prefs: Codable, Equatable {
         try c.encode(version, forKey: .version)
         try c.encode(sshHost, forKey: .sshHost)
         try c.encode(projects, forKey: .projects)
+        try c.encode(tools, forKey: .tools)
         try c.encode(inboxRead, forKey: .inboxRead)
     }
 
@@ -191,6 +206,7 @@ struct Prefs: Codable, Equatable {
         version = (try? c.decode(Int.self, forKey: .version)) ?? 1
         sshHost = (try? c.decode(String.self, forKey: .sshHost)) ?? Prefs.defaultSSHHost
         projects = (try? c.decode([Project].self, forKey: .projects)) ?? []
+        tools = (try? c.decode([Tool].self, forKey: .tools)) ?? []
         // A v1 TOOL TAB BECOMES A PROJECT rather than being deleted.
         //
         // v2 dropped them, which threw away the one Chancellor had actually
@@ -238,6 +254,16 @@ struct Prefs: Codable, Equatable {
     /// nothing comes from a gateway group any more.
     static func isValidProjectID(_ id: String) -> Bool {
         guard id.count >= 3, id.hasPrefix("p-") else { return false }
+        let body = id.dropFirst(2)
+        guard let f = body.first, f.isLowercase || f.isNumber else { return false }
+        return body.allSatisfy { $0.isNumber || ($0.isLowercase && $0.isASCII) || $0 == "-" }
+    }
+
+    /// A tool id is minted by the page as `t-<slug>` (counting up on collision),
+    /// the same shape as a project id but a `t-` prefix, so the two id spaces
+    /// never collide.
+    static func isValidToolID(_ id: String) -> Bool {
+        guard id.count >= 3, id.hasPrefix("t-") else { return false }
         let body = id.dropFirst(2)
         guard let f = body.first, f.isLowercase || f.isNumber else { return false }
         return body.allSatisfy { $0.isNumber || ($0.isLowercase && $0.isASCII) || $0 == "-" }
@@ -333,6 +359,19 @@ struct Prefs: Codable, Equatable {
                                     clones: Prefs.normalisedClones(proj.clones, access: access)))
         }
         out.projects = projects
+        // Tools go through the same gate: a valid `t-` id, a non-empty name, no
+        // duplicates. A tool carries no agents or clones, so there is nothing
+        // else here to normalise.
+        var toolSeen = Set<String>()
+        var tools: [Tool] = []
+        for t in p.tools {
+            guard Prefs.isValidToolID(t.id), !toolSeen.contains(t.id) else { continue }
+            let name = t.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty else { continue }
+            toolSeen.insert(t.id)
+            tools.append(Tool(id: t.id, name: name))
+        }
+        out.tools = tools
         var readSeen = Set<String>()
         out.inboxRead = p.inboxRead.filter { readSeen.insert($0).inserted }
         return out

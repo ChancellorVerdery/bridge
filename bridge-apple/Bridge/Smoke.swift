@@ -1043,10 +1043,11 @@ enum Smoke {
         let sbLabels = SB["labels"] as? [String] ?? []
         let sbSections = SB["sections"] as? [String] ?? []
 
-        check("the sidebar's only section is Projects",
-              sbSections == ["Projects"] && sbHeads == ["Projects"], sidebar)
-        // The two entries he named explicitly. Both were in the sidebar before
-        // this pass and both had to go.
+        // NAV_SECTIONS still holds only Projects; the Tools section is rendered
+        // separately below it, so the rendered sidebar shows two heads.
+        check("the sidebar has a Projects section, then a Tools section",
+              sbSections == ["Projects"] && sbHeads == ["Projects", "Tools"], sidebar)
+        // Room used to be a sidebar entry; it is a project's first tab now.
         check("there is NO Room entry in the sidebar",
               !sbLabels.contains("Room"), sidebar)
         check("there is NO top-level agent list",
@@ -1054,8 +1055,8 @@ enum Smoke {
               && !sbLabels.contains("Frontend Design")
               && !sbLabels.contains("Backend Design")
               && !sbLabels.contains("Full Stack"), sidebar)
-        check("and no Tools section either — a tool tab is not a project",
-              !sbHeads.contains("Tools") && !sbLabels.contains("Education"), sidebar)
+        check("there IS a Tools section now, separate from Projects — a tool is not a project",
+              sbHeads.contains("Tools") && sbHeads != ["Tools"], sidebar)
         check("every category in the sidebar is a project",
               (SB["kinds"] as? [String] ?? []) == ["project"], sidebar)
         check("the Inbox is above the sections rather than inside one",
@@ -2587,6 +2588,18 @@ enum Smoke {
 
         "settings": "openSettings(); true",
 
+        // The Tools section and a tool's blank page. The demo tool is pushed
+        // into the IN-MEMORY mirror only — no savePrefs, so nothing is written
+        // to disk and no real document is touched by taking this shot.
+        "tool": """
+          (function(){
+            if (!PREFS.tools.some(function(t){ return t.id === 't-demo'; }))
+              PREFS.tools.push({ id: 't-demo', name: 'Study Helper' });
+            openTool('t-demo');
+            return true;
+          })()
+        """,
+
         // A project with a customized roster, and the picker open beside it.
         // The roster is written through the real prefs path, so this is also a
         // live exercise of the persistence store.
@@ -2716,17 +2729,6 @@ enum Smoke {
         // exercise this end to end rather than injecting one here.
         "question": """
           (function(){ openInbox(); return (INBOX.filter(e=>e.kind==='question').length>0); })()
-        """,
-
-        // A tool tab. Education ships in the default prefs.
-        "tool": """
-          (function(){
-            const c = CATEGORIES.find(x => x.kind === 'tool');
-            if (!c) return false;
-            S.view='sessions'; S.catId=c.id; S.sub=null;
-            renderAll();
-            return true;
-          })()
         """,
 
         // THE VOICE INDICATOR, PHOTOGRAPHED — three passes after it was first

@@ -3491,3 +3491,46 @@ because `__focusReal` could no longer find an agent tab). `clones` is now
   first two.
 * The `onkeyup`/`onblur` audit pass 9 named. Seven passes on.
 * The 760px transcript-floor-vs-composer decision. Still his.
+
+# Pass 17 — Tools: a second sidebar section, single-agent, blank for now, 2026-09-08
+
+Pass 15 folded the old tool tabs into projects and removed the TOOLS section
+entirely. Chancellor wants it back, but as a DIFFERENT kind of thing: a tool is
+a single-agent AI utility (a study helper, a prelab writer), not the
+team-of-agents room a project is. For now, creating a tool just opens a blank
+placeholder page — the backing agent comes later.
+
+## Shape
+
+* `Prefs.Tool { id, name }` and `Prefs.tools: [Tool]`, a list separate from
+  `projects`. Round-trips through the existing `asDictionary`/`from` Codable
+  boundaries, so no new bridge plumbing. `sanitized` gates tools the same way as
+  projects: a valid `t-<slug>` id (isValidToolID), non-empty name, deduped. Tool
+  ids are `t-`, project ids `p-`, so the two id spaces never collide and a shared
+  `S.removing`/`S.adding` cannot confuse one for the other.
+* live.js: `PREFS.tools`, carried in `savePrefs`, ingested in the `prefs` case;
+  `toolCreate`/`toolRemove` behind the same `requireUserIntent` gate as projects.
+* app.js: a TOOLS section rendered below the NAV_SECTIONS loop (tools are not
+  categories and must not enter CATEGORIES/agentById). `commitAdd` branches on
+  `S.adding`; `openTool`/`removeTool`; a `renderToolView` that reuses the Inbox/
+  Settings shell to show a deliberately blank page that says what it is and what
+  is coming. No new CSS — it reuses `.work`/`.empty-cat`.
+
+## Verified
+
+* `build.sh smoke` — all good (1 skipped). The two assertions that hard-coded
+  pass-15's "no Tools section / only Projects" were flipped to assert the new
+  intended shape (sidebar heads == ["Projects","Tools"]; a Tools section exists).
+  The skip is a stale "empty tool tab" assertion from the old concept; left as a
+  harmless skip rather than rewired.
+* `--shot --view tool` (a demo tool pushed into the in-memory mirror only, no
+  disk write): renders the sidebar Projects + Tools sections and the blank tool
+  page, no clipping, gateway connected. Screenshot reviewed.
+* Built Release, installed to /Applications, relaunched.
+
+## Not done / next
+
+* The single backing agent. A tool is a name and a blank page today.
+* Carrying Tools into the terminal redesign (still only a canvas mockup).
+* The relay's state.json still needs re-seeding to the migrated `p-` project ids
+  (was seeded from the pre-migration `g-` ids) — housekeeping, relay is disabled.
