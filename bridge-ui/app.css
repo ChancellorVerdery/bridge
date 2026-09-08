@@ -1746,13 +1746,18 @@ body {
 }
 .page-tab.is-active .tick { color: var(--brass); }
 
-/* The ">" prompt: the composer reads as a terminal line. */
+/* The ">" prompt: the composer reads as a terminal line. Its box mirrors
+   .ta's metrics (box-sizing/padding/min-height/line-height/font-size) so that,
+   both bottom-aligned in the flex row, the glyph sits centered on the first
+   input line instead of floating above it. */
 .compose-box::before {
   content: ">";
-  align-self: flex-start;
   color: var(--brass);
   font-weight: 600;
-  padding: 13px 0 0 12px;
   flex: none;
-  line-height: 1;
+  box-sizing: border-box;
+  padding: 6px 0 6px 12px;
+  min-height: 34px;
+  font-size: 13.5px;
+  line-height: 1.5;
 }
