@@ -238,37 +238,10 @@ function projectRemove(id) {
   return true;
 }
 
-/* CUSTOM TOOLS. A tool is not a project — it is a single-agent AI utility, and
-   for now it is only a name that opens a blank page. It lives behind the same
-   user-intent gate as a project, and mints a `t-<slug>` id in the shape
-   Prefs.isValidToolID accepts, so tool and project ids never collide. */
-function newToolId(name) {
-  const base = 't-' + projectSlug(name);
-  const taken = new Set(PREFS.tools.map((t) => t.id));
-  if (!taken.has(base)) return base;
-  let n = 2;
-  while (taken.has(base + '-' + n)) n += 1;
-  return base + '-' + n;
-}
-
-function toolCreate(name, kind) {
-  requireUserIntent('create a tool');
-  const clean = String(name || '').trim();
-  if (!clean) return null;
-  const id = newToolId(clean);
-  PREFS.tools.push({ id, name: clean, kind: kind === 'study' ? 'study' : 'blank' });
-  savePrefs();
-  return id;
-}
-
-function toolRemove(id) {
-  requireUserIntent('remove a tool');
-  const i = PREFS.tools.findIndex((t) => t.id === id);
-  if (i < 0) return false;
-  PREFS.tools.splice(i, 1);
-  savePrefs();
-  return true;
-}
+/* TOOLS are built-in and fixed now (see app.js BUILTIN_TOOLS): a tool is not
+   created or removed, so there is no toolCreate/toolRemove here any more. The
+   PREFS.tools list + its sync plumbing stay (dormant) so an older document that
+   still carries user-created tools round-trips cleanly. */
 
 /* Bring a mirrored v2 document up to the v3 shape, and nothing else.
 

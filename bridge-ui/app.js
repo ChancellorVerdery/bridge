@@ -433,6 +433,19 @@ function TopbarActions() {
    active. The one addition is a mono status line under the name, because a
    navigator that cannot tell you which project is on fire is decoration. */
 
+/* Tools are BUILT-IN and fixed — a tool just exists, it is not created or
+   removed. Right now there is one: the Study workbench. Its id is stable so its
+   store (bridge.study.v1) and its gateway session (agent:coursework:bridge:
+   t-study) are stable too. `toolById` also falls back to PREFS.tools so any
+   tool left in an older document (or pushed by a screenshot fixture) still
+   resolves. */
+const BUILTIN_TOOLS = [{ id: 't-study', name: 'Study', kind: 'study', sub: 'tutor + question bank' }];
+function toolById(id) {
+  return BUILTIN_TOOLS.find((t) => t.id === id)
+    || ((typeof PREFS !== 'undefined' ? PREFS.tools : []) || []).find((t) => t.id === id)
+    || null;
+}
+
 function Nav() {
   const nav = document.getElementById('nav');
   if (!nav) return;
@@ -529,6 +542,7 @@ function Nav() {
     if (sec.add) {
       if (S.adding === sec.add) {
         const input = h('input.add-in', {
+          id: 'add-in',
           value: S.newName, autofocus: true,
           placeholder: 'Project name…',
           oninput: (ev) => { S.newName = ev.target.value; },
@@ -550,12 +564,11 @@ function Nav() {
   }
 
   /* TOOLS — a second section below Projects. A tool is NOT a project: it is a
-     single-agent utility that, for now, opens a blank page. Its own section,
-     its own create/remove, so the sidebar says plainly that the two are
-     different kinds of thing. Tool ids are `t-…`, project ids `p-…`, so a
-     shared S.removing / S.adding never confuses one for the other. */
+     single-agent utility, and unlike a project it is BUILT-IN — it just exists,
+     it is not created or removed. Its own section so the sidebar says plainly
+     the two are different kinds of thing. */
   const toolBox = h('div.nav__sec', h('p.nav__head', { 'data-enter': 'navhead:Tools' }, 'Tools'));
-  for (const t of (typeof PREFS !== 'undefined' ? PREFS.tools : [])) {
+  for (const t of BUILTIN_TOOLS) {
     const active = S.view === 'tool' && S.toolId === t.id;
     toolBox.append(h('div.nav__wrap',
       h('a.nav__item', {
@@ -567,36 +580,8 @@ function Nav() {
         h('span.mc-ico', { html: ICONS.work }),
         h('span.nav__col',
           h('span.nav__row', h('span.nav__label', t.name)),
-          h('span.nav__sub', t.kind === 'study' ? 'tool · tutor + question bank' : 'tool · blank for now')),
-        h('span.nav__dot')),
-      S.removing === t.id
-        ? h('div.nav__rm',
-            h('span', 'Remove ' + t.name + '?'),
-            h('button.add-go', { onclick: fromUser(() => { removeTool(t.id); }) }, 'Remove'),
-            h('button.add-x', { onclick: () => { S.removing = null; renderAll(); } }, '×'))
-        : h('button.nav__rm-b', {
-            title: 'Remove ' + t.name,
-            'aria-label': 'Remove ' + t.name,
-            onclick: (ev) => { ev.preventDefault(); S.removing = t.id; renderAll(); },
-          }, '×')));
-  }
-  if (S.adding === 'tool') {
-    const input = h('input.add-in', {
-      value: S.newName, autofocus: true,
-      placeholder: 'Tool name…',
-      oninput: (ev) => { S.newName = ev.target.value; },
-      onkeydown: fromUser((ev) => {
-        if (ev.key === 'Enter') { ev.preventDefault(); commitAdd(); }
-        if (ev.key === 'Escape') { S.adding = null; S.newName = ''; renderAll(); }
-      }),
-    });
-    toolBox.append(h('div.add-row', input,
-      h('button.add-go', { onclick: fromUser(() => commitAdd()) }, 'Add'),
-      h('button.add-x', { onclick: () => { S.adding = null; S.newName = ''; renderAll(); } }, '×')));
-  } else {
-    toolBox.append(h('button.nav__add', {
-      onclick: () => { S.adding = 'tool'; S.newName = ''; renderAll(); },
-    }, h('span', '+'), 'New tool'));
+          h('span.nav__sub', 'tool · ' + (t.sub || 'single-agent utility'))),
+        h('span.nav__dot'))));
   }
   nav.append(toolBox);
 }
@@ -2100,19 +2085,8 @@ function toggleAccess(c, agentId) {
    which is exactly what the old picker-less flow produced. */
 function commitAdd() {
   const name = (S.newName || '').trim();
-  const kind = S.adding;         // 'project' (from NAV_SECTIONS) or 'tool'
+  // Only projects are created here now — tools are built-in and fixed.
   if (!name) { S.adding = null; renderAll(); return; }
-  // A TOOL is not a project: create it and open its (blank) page. No room, no
-  // clones, no picker — a tool is one agent and one page.
-  if (kind === 'tool') {
-    // Study is the one implemented tool kind, and porting it is what tools are
-    // for right now — so a new tool is a study workbench, not a blank page.
-    const id = toolCreate(name, 'study');
-    S.adding = null; S.newName = '';
-    if (!id) { renderAll(); return; }
-    openTool(id);
-    return;
-  }
   const id = projectCreate(name);
   S.adding = null; S.newName = '';
   if (!id) { renderAll(); return; }
@@ -2142,12 +2116,6 @@ function removeProject(id) {
 function openInbox() { S.view = 'inbox'; S.removing = null; S.access = null; renderAll(); }
 function openSettings() { S.view = 'settings'; S.removing = null; S.access = null; renderAll(); }
 function openTool(id) { S.view = 'tool'; S.toolId = id; S.removing = null; S.access = null; renderAll(); }
-function removeTool(id) {
-  if (!toolRemove(id)) { S.removing = null; renderAll(); return; }
-  S.removing = null;
-  if (S.view === 'tool' && S.toolId === id) { S.view = 'sessions'; S.toolId = null; }
-  renderAll();
-}
 
 /* ───────────────────────── render ───────────────────────── */
 
@@ -2171,7 +2139,7 @@ function renderAll() {
   // sessions, so it must not go through the category path below. If its tool
   // was removed out from under it, fall back to the projects view.
   if (S.view === 'tool') {
-    const tool = (typeof PREFS !== 'undefined' ? PREFS.tools : []).find((t) => t.id === S.toolId);
+    const tool = toolById(S.toolId);
     if (tool) return renderToolView(tool, keep);
     S.view = 'sessions'; S.toolId = null;
   }
@@ -2432,7 +2400,11 @@ function captureUi() {
     if (n) keep.scroll[id] = { top: n.scrollTop, agent: n.getAttribute('data-agent'),
       atBottom: n.scrollHeight - n.scrollTop - n.clientHeight < 24 };
   }
-  if (el && el.tagName === 'TEXTAREA' && el.id) {
+  // Preserve focus + caret for any id'd text control across a re-render, not
+  // just transcript textareas. The app re-renders on every gateway event, so a
+  // sidebar <input> (naming a project) would otherwise lose focus mid-keystroke
+  // every time a session ticked — you literally could not type into it.
+  if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') && el.id) {
     keep.focus = { id: el.id, start: el.selectionStart, end: el.selectionEnd };
   }
   return keep;

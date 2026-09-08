@@ -1084,6 +1084,28 @@ enum Smoke {
               (SB["removeButtons"] as? Int ?? 0) == (SB["projects"] as? [String] ?? []).count
               && (SB["removeButtons"] as? Int ?? 0) > 0, sidebar)
 
+        // ---- the name input keeps focus across a re-render --------------------
+        // The app re-renders on every gateway event; the sidebar naming <input>
+        // has no persistent identity of its own, so it was rebuilt and lost
+        // focus mid-keystroke — you could not type into it. captureUi now keeps
+        // focus for any id'd input, and the add-input carries id="add-in".
+        // Focus the input, then force a re-render, and assert focus survived.
+        let keptFocus = (try? await web.evaluateJavaScript("""
+          (function(){
+            S.adding = 'project'; renderAll();
+            var inp = document.getElementById('add-in');
+            if (!inp) { S.adding = null; renderAll(); return 'no-input'; }
+            inp.focus(); inp.value = 'abc'; S.newName = 'abc';
+            try { inp.setSelectionRange(3, 3); } catch(e){}
+            renderAll(); // stand in for a gateway event repainting the sidebar
+            var a = document.activeElement;
+            var ok = !!(a && a.id === 'add-in' && a.selectionStart === 3);
+            S.adding = null; S.newName = ''; renderAll();
+            return ok ? 'kept' : ('lost:' + (a && a.id));
+          })()
+        """)) as? String ?? "nil"
+        check("a sidebar name input keeps focus + caret across a re-render", keptFocus == "kept", keptFocus)
+
         // ---- main FIRST, then one tab per agent -------------------------------
         let tabs = (try? await web.evaluateJavaScript("""
           (function(){
