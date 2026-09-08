@@ -55,5 +55,10 @@
 <script src="data.js"></script>
 <script src="app.js"></script>
 <script src="live.js"></script>
+<!-- Study tool: study.js (data + grading) defines window.Study and must load
+     before studyui.js reads it; the heavy vendored libs (MathLive, Compute
+     Engine, marked) are lazy-loaded by studyui.js on first open. -->
+<script src="study.js"></script>
+<script src="studyui.js"></script>
 </body>
 </html>

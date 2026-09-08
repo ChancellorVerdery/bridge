@@ -83,6 +83,18 @@ enum Smoke {
             "typeof crypto.randomUUID === 'function'")) as? Bool ?? false
         check("origin is a secure context (crypto.randomUUID exists)", secure)
 
+        // ---- the Study tool's scripts parse and wire their globals -----------
+        // A syntax error in study.js / studyui.js would leave these undefined
+        // even though the page still boots, so assert them explicitly. (The
+        // grading money-path is checked in Node — study-selfcheck.cjs — because
+        // it needs the ~1MB Compute Engine that studyui lazy-loads on open.)
+        let studyWired = (try? await web.evaluateJavaScript(
+            "!!(window.Study && typeof window.Study.checkPart === 'function' && typeof window.Study.partRule === 'function'"
+            + " && window.StudyAI && typeof window.StudyAI.configured === 'function' && typeof window.StudyAI.chat === 'function'"
+            + " && window.StudyUI && typeof window.StudyUI.attach === 'function')"
+        )) as? Bool ?? false
+        check("Study tool scripts load and expose Study / StudyAI / StudyUI", studyWired)
+
         // ---- a request id is an idempotency key, so it must survive a relaunch --
         //
         // Swift passes this id to the gateway verbatim as chat.send's

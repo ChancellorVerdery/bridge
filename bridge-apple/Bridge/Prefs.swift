@@ -178,6 +178,20 @@ struct Prefs: Codable, Equatable {
     struct Tool: Codable, Equatable, Identifiable {
         var id: String
         var name: String
+        // What the tool's page IS. "study" = the ported study workbench (tutor
+        // chat + question bank); "blank" = a named placeholder page, as before.
+        // Decoded tolerantly so a tool written before this field existed loads
+        // as "blank" instead of throwing and taking the whole tools array with
+        // it (the list is decoded as one `try?`).
+        var kind: String = "blank"
+        enum CodingKeys: String, CodingKey { case id, name, kind }
+        init(id: String, name: String, kind: String = "blank") { self.id = id; self.name = name; self.kind = kind }
+        init(from d: Decoder) throws {
+            let c = try d.container(keyedBy: CodingKeys.self)
+            id = try c.decode(String.self, forKey: .id)
+            name = try c.decode(String.self, forKey: .name)
+            kind = (try? c.decode(String.self, forKey: .kind)) ?? "blank"
+        }
     }
 
     /// `toolTabs` is DECODE-ONLY: read from a v1 document so its tabs can become
@@ -369,7 +383,7 @@ struct Prefs: Codable, Equatable {
             let name = t.name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !name.isEmpty else { continue }
             toolSeen.insert(t.id)
-            tools.append(Tool(id: t.id, name: name))
+            tools.append(Tool(id: t.id, name: name, kind: t.kind == "study" ? "study" : "blank"))
         }
         out.tools = tools
         var readSeen = Set<String>()

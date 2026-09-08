@@ -13,5 +13,8 @@ node mkatlas.js --check ref/styles.css
 
 rm -rf dist
 mkdir -p dist
-cp index.html fonts.css atlas.css app.css data.js app.js live.js dist/
-echo "dist/  $(ls dist | wc -l | tr -d ' ') files  $(du -sh dist | cut -f1)"
+cp index.html fonts.css atlas.css app.css data.js app.js live.js study.js studyui.js dist/
+# The Study tool's vendored libraries (MathLive + fonts/CSS, Compute Engine,
+# marked). Served from the loopback origin, lazy-loaded on first open — no CDN.
+cp -R vendor dist/vendor
+echo "dist/  $(find dist -type f | wc -l | tr -d ' ') files  $(du -sh dist | cut -f1)"

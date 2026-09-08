@@ -567,7 +567,7 @@ function Nav() {
         h('span.mc-ico', { html: ICONS.work }),
         h('span.nav__col',
           h('span.nav__row', h('span.nav__label', t.name)),
-          h('span.nav__sub', 'tool · blank for now')),
+          h('span.nav__sub', t.kind === 'study' ? 'tool · tutor + question bank' : 'tool · blank for now')),
         h('span.nav__dot')),
       S.removing === t.id
         ? h('div.nav__rm',
@@ -2105,7 +2105,9 @@ function commitAdd() {
   // A TOOL is not a project: create it and open its (blank) page. No room, no
   // clones, no picker — a tool is one agent and one page.
   if (kind === 'tool') {
-    const id = toolCreate(name);
+    // Study is the one implemented tool kind, and porting it is what tools are
+    // for right now — so a new tool is a study workbench, not a blank page.
+    const id = toolCreate(name, 'study');
     S.adding = null; S.newName = '';
     if (!id) { renderAll(); return; }
     openTool(id);
@@ -2239,6 +2241,7 @@ function renderAll() {
    page that says what it is and what is coming — not a fake transcript or a
    borrowed project room. It sits in the same chrome as Inbox and Settings. */
 function renderToolView(tool, keep) {
+  if (tool.kind === 'study') return renderStudyTool(tool, keep);
   return renderShellView(tool.name, 'Custom tool — nothing here yet', h('div.work',
     h('div.empty-cat', { 'data-enter': 'tool:' + tool.id },
       h('b', tool.name + ' is a blank tool.'),
@@ -2248,6 +2251,24 @@ function renderToolView(tool, keep) {
       h('p.empty-cat-w', h('b', 'Coming next: '),
         'one agent behind this page, run from here — not the team-of-agents room a project is.'))),
     keep);
+}
+
+/* The study tool owns a PERSISTENT root (window.__studyRoot). Rebuilding it on
+   the app's per-event render cadence would tear down the live MathLive editors
+   and their caret every gateway tick, so it is created once and reused. On a
+   real (re)entry we mount it into the shell and hand it to StudyUI; while it is
+   already mounted, a background render only refreshes the sidebar and returns.
+   The study page re-renders on its OWN actions and its awaited gateway turns —
+   see studyui.js. */
+function renderStudyTool(tool, keep) {
+  if (!window.__studyRoot) window.__studyRoot = h('div.st-root', { id: 'study-root' });
+  const su = window.StudyUI;
+  const content = document.getElementById('content');
+  const already = su && su.mounted && su.mounted() && su.toolId && su.toolId() === tool.id
+    && content && content.contains(window.__studyRoot);
+  if (already) { Nav(); SidebarFoot(); if (su.sync) su.sync(); syncHash(); return; }
+  renderShellView(tool.name, 'Study · tutor + question bank', h('div.work', window.__studyRoot), keep);
+  if (su && su.attach) su.attach(window.__studyRoot, { toolId: tool.id });
 }
 
 function renderShellView(title, sub, body, keep, tabs) {

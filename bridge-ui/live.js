@@ -251,12 +251,12 @@ function newToolId(name) {
   return base + '-' + n;
 }
 
-function toolCreate(name) {
+function toolCreate(name, kind) {
   requireUserIntent('create a tool');
   const clean = String(name || '').trim();
   if (!clean) return null;
   const id = newToolId(clean);
-  PREFS.tools.push({ id, name: clean });
+  PREFS.tools.push({ id, name: clean, kind: kind === 'study' ? 'study' : 'blank' });
   savePrefs();
   return id;
 }
@@ -1752,6 +1752,99 @@ function answer(a, option) {
   S.draft[a.id] = option && option.label ? option.label : '';
   submitComposer(a);
 }
+
+/* ───────────────────────── the Study tool's gateway bridge ─────────────────
+   The Study tool (studyui.js) needs three AI moves Atlas served from a Vite
+   dev-server middleware: the tutor turn and the answer judge (the third,
+   file→question extraction, needs an attachment path the native send does not
+   have, so it is not offered here). Both are ordinary gateway turns to a
+   per-tool clone of the coursework agent — `agent:coursework:bridge:<toolId>`
+   for the tutor, a sibling `…-judge` session for grading so judge JSON never
+   clutters the tutor transcript. chat.send creates either session on first use.
+
+   The gateway is asynchronous — a reply lands in LIVE.history later — but the
+   ported UI code `await`s a value the way it awaited a fetch. So `turn()`
+   returns a Promise resolved when the run completes: while one is pending, a
+   short poll watches the session's `hasActiveRun` fall and its history grow,
+   then reads the last assistant message off the backfill. The UI's one-turn
+   busy lock means only one turn is ever in flight, so a single pending slot and
+   one poll timer suffice. */
+const STUDY_AGENT = 'coursework'; // the tutor; swap here if the roster renames it
+let studyKeys = { tutor: null, judge: null };
+let studyPending = null; // { key, baseCount, resolve, reject, deadline }
+let studyTimer = null;
+
+function assistantText(m) {
+  if (!m || m.role !== 'assistant') return '';
+  return Array.isArray(m.content)
+    ? m.content.filter((b) => b && b.type === 'text').map((b) => b.text || '').join('\n').trim()
+    : (typeof m.content === 'string' ? m.content.trim() : '');
+}
+
+function studyPoll() {
+  if (!studyPending) { if (studyTimer) { clearInterval(studyTimer); studyTimer = null; } return; }
+  const p = studyPending;
+  if (nowS() * 1000 > p.deadline) { studyPending = null; p.reject(new Error('the gateway did not answer within 180s')); return; }
+  const row = LIVE.rows.get(p.key);
+  const h = LIVE.history.get(p.key);
+  const msgs = (h && h.messages) || [];
+  const running = !!(row && row.hasActiveRun);
+  if (running || msgs.length <= p.baseCount) return; // run not finished / nothing new yet
+  // Newest assistant message in the backfill is this turn's answer.
+  let text = '';
+  for (let i = msgs.length - 1; i >= 0; i--) { const t = assistantText(msgs[i]); if (t) { text = t; break; } }
+  if (!text) return; // grew with a user echo only — wait for the assistant block
+  studyPending = null;
+  p.resolve(text);
+}
+
+// One turn against `key`, resolving with the assistant's reply text.
+function studyDoTurn(key, text) {
+  if (studyPending) return Promise.reject(new Error('a study turn is already in flight'));
+  if (!key) return Promise.reject(new Error('the study tool has no session key yet'));
+  if (!window.__bridgeSend) return Promise.reject(new Error('Bridge is not running inside the native shell, so there is no socket to send on.'));
+  const h = LIVE.history.get(key);
+  const baseCount = ((h && h.messages) || []).length;
+  const id = reqId('study');
+  const sent = bridgeSend({ t: 'send', requestId: id, sessionKey: key, text, queueMode: '' });
+  if (!sent) return Promise.reject(new Error('the gateway send was refused'));
+  return new Promise((resolve, reject) => {
+    studyPending = { key, baseCount, resolve, reject, deadline: nowS() * 1000 + 180000 };
+    if (!studyTimer) studyTimer = setInterval(studyPoll, 400);
+  });
+}
+
+// Pull the first fenced json (or bare {...}) object out of an agent reply.
+function studyParseJSON(text) {
+  const t = String(text || '');
+  const fenced = t.match(/```json\s*([\s\S]*?)```/i) || t.match(/```\s*([\s\S]*?)```/);
+  const candidates = [];
+  if (fenced) candidates.push(fenced[1]);
+  const brace = t.indexOf('{'); const end = t.lastIndexOf('}');
+  if (brace >= 0 && end > brace) candidates.push(t.slice(brace, end + 1));
+  for (const c of candidates) { try { return JSON.parse(c); } catch { /* next */ } }
+  return null;
+}
+
+window.StudyAI = {
+  configured() { return !!window.__bridgeSend; },
+  setTool(toolId) {
+    const base = 'agent:' + STUDY_AGENT + ':bridge:' + String(toolId || 't-study');
+    studyKeys = { tutor: base, judge: base + '-judge' };
+  },
+  chat(prompt) { return studyDoTurn(studyKeys.tutor, String(prompt || '')); },
+  async judge(items) {
+    const rows = (items || []).map((it) =>
+      `- n=${it.n} | question: ${it.question || '(none)'} | expected: ${it.expected} | student answered: ${it.given} | rule: ${it.rule}`).join('\n');
+    const prompt = 'You are grading a student\'s math/text answers. For each item decide whether the student\'s '
+      + 'answer satisfies the rule for the expected answer. Reply with ONLY a fenced json block, no prose:\n'
+      + '```json\n{"verdicts":[{"n":0,"correct":true,"note":"one short reason"}]}\n```\n\nItems:\n' + rows;
+    const reply = await studyDoTurn(studyKeys.judge, prompt);
+    const obj = studyParseJSON(reply);
+    if (!obj || !Array.isArray(obj.verdicts)) throw new Error('judge returned no usable verdicts');
+    return { verdicts: obj.verdicts };
+  },
+};
 
 function onComposerKey(ev, a) {
   // Hold space to talk, under the same arming rule as the room composer: only
