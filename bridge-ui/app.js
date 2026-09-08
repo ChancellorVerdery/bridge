@@ -1057,7 +1057,6 @@ function Foot(a, c, role) {
     onkeyup: (ev) => { if (ev.key === ' ') voiceStop(); },
     onblur: () => { if (VOICE.requestId) voiceStop(); },
   });
-  if (!cmdMode) box.append(PingBar(c, a));
   box.append(h('div.compose-box', { 'data-cmd': cmdMode ? '1' : '0', 'data-off': off ? '1' : '0' },
     ta,
     h('button.send', { 'data-off': off ? '1' : '0', onclick: () => submitComposer(a, c) },
@@ -1074,12 +1073,6 @@ function Foot(a, c, role) {
   } else if (cmdMode) {
     box.append(h('div.note', { 'data-k': 'info' }, h('b', '/'),
       'Commands act on this session directly and are not queued behind the run. Enter runs the highlighted command; Tab completes it.'));
-  } else if (S.ping[c.id]) {
-    const target = S.ping[c.id];
-    box.append(h('div.note', { 'data-k': 'info' }, h('b', '→'),
-      'Pinged: this goes straight to ' + agentLabel(target) + '. '
-      + (running ? 'That lane is mid-turn, so it queues for its next step.'
-                 : 'That lane has no active turn, so it is delivered and starts one.')));
   } else if (isMain(a)) {
     const r = routeFor(c, text);
     box.append(h('div.note', { 'data-k': r.k === 'queue' ? 'warn' : 'info' }, h('b', '→'), r.text));
@@ -1143,47 +1136,11 @@ function Foot(a, c, role) {
    rather than implying a capability that would fail. Nothing here attempts to
    enable anything. */
 
-function PingBar(c, a) {
-  const cur = S.ping[c.id] || null;
-  const bar = h('div.ping');
-  bar.append(h('span.ping-l', 'ping'));
-
-  const bubble = (id, label, title) => h('button.page-tab.ping-b', {
-    class: (cur === id ? 'is-active' : ''),
-    'data-none': id === null ? '1' : '0',
-    'aria-pressed': cur === id ? 'true' : 'false',
-    title,
-    onclick: () => { S.ping[c.id] = id; renderAll(); },
-  }, label);
-
-  bar.append(bubble(null, 'no ping → main',
-    'Unpinged. The message goes to the main session; Thuban pings whichever lane is needed.'));
-
-  // THE ACCESS LIST, not the launched clones. Pinging an agent that is allowed
-  // in but not yet launched is exactly what launches it, so offering only what
-  // is already running would hide the normal way work starts.
-  const ids = (c.access && c.access.length)
-    ? c.access
-    : [...new Set(c.agents.map((x) => x.lane))].filter(Boolean);
-  for (const id of ids) {
-    if (id === 'main') continue;      // "no ping" already IS main
-    bar.append(bubble(id, agentLabel(id), 'Ping ' + id + ' — the message goes straight to that lane.'));
-  }
-
-  /* Where the message goes is stated once, by the .note directly under the
-     input — which already exists and already has a ping branch. Repeating it
-     here cost 30px of transcript to print the same sentence twice, in a
-     composer that has form three times over.
-
-     What is NOT stated anywhere else, and so belongs here, is the caveat: the
-     strip depicts a topology the gateway currently enforces by omission rather
-     than by design. One line, and it stays on screen. */
-  const wrap = h('div.ping-wrap', bar);
-  wrap.append(h('p.ping-note.ping-cap', h('b', 'star topology, not a choice: '),
-    'lane-to-lane routing needs tools.agentToAgent and tools.sessions.visibility, both unset on '
-    + 'this gateway. Lanes answer main. Bridge does not change gateway config.'));
-  return wrap;
-}
+/* PingBar — the agent-pane ping-button row — was removed. Agents are addressed
+   by typing @<agent>, parsed at send time (routeFor for the note, Room.pings on
+   the native side for delivery). submitComposer always sent to the pane's own
+   session regardless of the selected bubble, so the buttons only ever drove a
+   note; the note now explains the @ convention instead. */
 
 /* ───────────────────────── §R  what the gateway said ─────────────────────────
    Every send ends here. Three states and no fourth: in flight, landed, refused.
@@ -1415,9 +1372,9 @@ function RoomView(cat) {
   if (!room.messages.length) {
     tx.append(h('div.empty', { 'data-enter': 'room-empty' },
       h('div', 'Nothing has been said in ' + cat.name + ' yet.'),
-      h('div.mc-foot', 'A message with no ping goes to this project’s main. Pick a lane below '
-        + 'to hand it straight to that agent instead — and they can hand it on from there, '
-        + 'inside this project.')));
+      h('div.mc-foot', 'A message with no @ goes to this project’s main. Type @<agent> to hand it '
+        + 'straight to that agent instead — and they can hand it on from there, inside this '
+        + 'project.')));
   }
   for (const m of room.messages) tx.append(RoomMsg(m));
   pane.append(tx);
@@ -1452,8 +1409,11 @@ function RoomMsg(m) {
 function RoomFoot(cat) {
   const box = h('div.foot');
   const room = roomOf(cat.id);
-  const target = S.roomPing;
-  const wantKey = 'agent:' + (target || 'main') + ':bridge:' + cat.id;
+  // Where a message goes is parsed from its text at send time: an @<agent>
+  // handle routes to that agent (main does not see it), no @ goes to main
+  // (Thuban). There is NO ping-button row — you address by typing @. The header
+  // reflects main, the default and the common case.
+  const wantKey = 'agent:main:bridge:' + cat.id;
   const live = cat.agents.find((a) => a.sessionKey === wantKey && !a.parent);
   const running = !!(live && live.status === 'running');
   const readOnly = typeof LIVE !== 'undefined' && LIVE.readOnly;
@@ -1462,16 +1422,13 @@ function RoomFoot(cat) {
   box.append(h('div.foot-h', 'Message ' + cat.name,
     h('span.spacer'),
     h('em', readOnly ? 'read-only connection — a send will be refused'
-      : running ? (target ? agentLabel(target) : 'Thuban') + ' is mid-turn — this will queue'
-      : 'no active turn — this starts one')));
+      : running ? 'Thuban is mid-turn — an unaddressed message will queue'
+      : 'no active turn — a message starts one')));
 
-  /* 2 — the ping bar. THE SAME CONTROL as the strip in the topbar. */
-  box.append(h('div.ping-wrap', h('div.ping', h('span.ping-l', 'ping'), AgentStrip('ping', cat))));
-
-  /* 3 — the input. */
+  /* 2 — the input. No ping buttons: address an agent by typing @<agent>. */
   const ta = h('textarea.ta', {
     id: 'cmd-main', rows: 1, value: S.roomDraft || '',
-    placeholder: 'Message ' + cat.name + ' — hold space to talk…',
+    placeholder: 'Message ' + cat.name + ' — type @agent to address one, hold space to talk…',
     oninput: (ev) => { S.roomDraft = ev.target.value; if (voiceAck('__room__')) renderAll(); },
     onkeydown: (ev) => onRoomKey(ev, cat),
     onkeyup: (ev) => { if (ev.key === ' ') voiceStop(); },
@@ -1484,17 +1441,12 @@ function RoomFoot(cat) {
   const v = VoiceState('__room__');
   if (v) box.append(v);
 
-  /* 4 — where this goes, stated before it goes there. */
-  box.append(target
-    ? h('div.note', { 'data-k': 'info' }, h('b', '→'),
-        'Pinged: this goes to ' + agentLabel(target) + ' in ' + cat.name + ' alone. main does '
-        + 'not see it. It lands in agent:' + target + ':bridge:' + cat.id + ', the persistent '
-        + 'thread Bridge keeps for that clone — not a new session, and not the same session as '
-        + agentLabel(target) + ' in any other project.')
-    : h('div.note', { 'data-k': 'info' }, h('b', '→'),
-        'No ping: this goes to ' + cat.name + '’s main (Thuban) and to nobody else. He sees '
-        + 'every unpinged message in this project, and can hand it on by pinging a lane in '
-        + 'his reply.'));
+  /* 4 — how to address one agent, stated before you do. */
+  box.append(h('div.note', { 'data-k': 'info' }, h('b', '@'),
+    'Type @<agent> anywhere in a message to send it to that agent in ' + cat.name + ' alone — '
+    + 'main (Thuban) does not see it, and it lands in that clone’s persistent thread. With no @, '
+    + 'the message goes to main (Thuban) and to nobody else; he can hand it on by @-ing a '
+    + 'teammate in his reply.'));
 
   const w = WriteState({ id: '__room__' });
   if (w) box.append(w);

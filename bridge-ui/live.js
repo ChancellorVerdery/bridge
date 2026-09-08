@@ -1182,10 +1182,29 @@ function roomOf(projectId) {
 /* The room is always the room OF a project — there is no global room to fall
    back to — so a send with no project is dropped rather than delivered into
    whichever transcript happened to be first. */
+/* The agent a typed room message is addressed to: the first @<handle> in the
+   text that is a non-main agent WITH ACCESS to this project. No such handle (or
+   only @main, or an outsider) means main. Mirrors Room.pings on the native side,
+   including the exact-match rule that stops "@maintainer" resolving to "main". */
+function parseRoomPing(text, projectId) {
+  const room = ROOM.byProject[projectId];
+  const access = (room && room.access) || [];
+  const re = /@([A-Za-z][A-Za-z0-9-]*)/g;
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const id = m[1].toLowerCase().replace(/-+$/, '');
+    if (id !== 'main' && access.indexOf(id) !== -1) return id;
+  }
+  return null;
+}
+
 function roomSend(projectId) {
   const text = (S.roomDraft || '').trim();
   if (!text || !projectId) return;
-  const ping = S.roomPing || null;
+  // Addressing is by typing @<agent>: the first in-project, non-main handle in
+  // the text is the target; no @ means main. The same parse the relay runs on
+  // an agent's reply, so Chancellor and an agent address a teammate identically.
+  const ping = parseRoomPing(text, projectId);
   if (!bridgeSend({ t: 'room.send', text, ping, project: projectId })) {
     const r = ROOM.byProject[projectId]
       || (ROOM.byProject[projectId] = { ...EMPTY_ROOM, messages: [], agents: [],

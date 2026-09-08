@@ -3534,3 +3534,48 @@ placeholder page — the backing agent comes later.
 * Carrying Tools into the terminal redesign (still only a canvas mockup).
 * The relay's state.json still needs re-seeding to the migrated `p-` project ids
   (was seeded from the pre-migration `g-` ids) — housekeeping, relay is disabled.
+
+# Pass 18 — address agents by typing @, ping buttons removed, 2026-09-08
+
+Chancellor: "remove the ping buttons. I only need to be able to type @."
+
+## What changed
+
+* Room composer (RoomFoot): the `AgentStrip('ping')` button row is gone. You
+  address an agent by typing @<agent> in the message; the note and empty-room
+  text now say so. Header defaults to main's status.
+* roomSend routes by parsing the text: `parseRoomPing(text, projectId)` returns
+  the first in-project, non-main @handle, else null (→ main). This is the SAME
+  parse the relay runs on an agent's reply (exact-match, so "@maintainer" is not
+  "main"), so Chancellor and an agent address a teammate identically.
+* Agent-pane composer (Foot): the `PingBar` row is gone too. `submitComposer`
+  always sent to the pane's own session and never read the selected bubble, so
+  the buttons only ever drove a note — removed with no routing change. PingBar()
+  deleted (orphaned); AgentStrip's dead 'ping' branch left in place (the function
+  is still used in 'nav' mode).
+
+## Verified
+
+* `build.sh smoke` — all good (1 skipped). Six ping-bubble assertions were
+  replaced by their new-behaviour counterparts: no `.ping-b` anywhere; the room
+  composer has no ping buttons; typing "@backend-design" makes roomSend hand over
+  ping=backend-design; a bare message hands over ping=null (main); the note
+  explains the @ convention. The Room.pings() native-parse assertions are
+  unchanged — the room now uses that same rule.
+* `--shot --view room`: composer is header + input ("type @agent to address
+  one…") + send, no ping row. Screenshot reviewed.
+* Release built, installed to /Applications, relaunched (pid confirmed).
+
+## A hazard this pass hit, and the fix for next time
+
+RUNNING `build.sh smoke` OVERWRITES THE REAL prefs.json. The `prefs` message
+handler always `Prefs.save`s to the real store, and smoke emits a 2-project
+fixture (`g-bridge`, `g-atlas`) at a point where `Prefs.directoryOverride` is
+nil — so the fixture is sanitised to `p-bridge`/`p-atlas` and left there, and any
+other project is dropped. It ate `p-education` this pass (restored by hand:
+access [main, coursework, frontend-design]). Pass 15 survived only because it
+backed prefs up to /tmp first and restored by checksum — a MANUAL step, not
+something smoke does itself. Until smoke is fixed to wrap every prefs emit in a
+directoryOverride, back up `~/Library/Application Support/Bridge/prefs.json`
+before running smoke and restore it after. Normal launches do not do this — only
+smoke.

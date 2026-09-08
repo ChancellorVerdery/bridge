@@ -697,31 +697,18 @@ enum Smoke {
         check("every breadcrumb says Projects, because that is all there is",
               CR.count == 1 && (CR["project"] as? String ?? "") == "Projects", crumbs)
 
-        // ---- ping bubbles ------------------------------------------------------
-        // The requirement is the SAME control, not a lookalike: the selected
-        // bubble must literally carry Atlas's .page-tab.is-active.
+        // ---- no ping buttons; you address by typing @ --------------------------
+        // The ping-button row was removed on Chancellor's instruction: a message
+        // is addressed by typing @<agent> into the composer, so there are no
+        // .ping-b bubbles anywhere in the app.
         let ping = (try? await web.evaluateJavaScript("""
           (function(){
-            const b = [...document.querySelectorAll('.ping-b')];
-            if (b.length > 1) b[1].click();
-            const sel = document.querySelector('.ping-b.is-active');
-            const cs = sel ? getComputedStyle(sel) : null;
-            const tab = document.querySelector('.page-tab.is-active:not(.ping-b)');
-            const ts = tab ? getComputedStyle(tab) : null;
-            return JSON.stringify({ bubbles: b.length,
-              selIsPageTab: !!(sel && sel.classList.contains('page-tab')),
-              selBg: cs ? cs.backgroundColor : '', tabBg: ts ? ts.backgroundColor : '',
-              selBorder: cs ? cs.borderTopColor : '', tabBorder: ts ? ts.borderTopColor : '' });
+            return JSON.stringify({ bubbles: document.querySelectorAll('.ping-b').length });
           })()
         """)) as? String ?? "{}"
         let P = (try? JSONSerialization.jsonObject(with: Data(ping.utf8))) as? [String: Any] ?? [:]
-        check("the composer has ping bubbles", (P["bubbles"] as? Int ?? 0) >= 2, ping)
-        check("a selected ping bubble IS an Atlas page-tab", (P["selIsPageTab"] as? Bool ?? false), ping)
-        // Same rule, same pixels. If someone re-implements the gold as a custom
-        // colour later, these two stop matching and this fails.
-        check("its selected state is Atlas's brass, not a copy of it",
-              (P["selBg"] as? String ?? "x") == (P["tabBg"] as? String ?? "y")
-              && (P["selBorder"] as? String ?? "x") == (P["tabBorder"] as? String ?? "y"), ping)
+        check("there are NO ping buttons anywhere — addressing is by typing @",
+              (P["bubbles"] as? Int ?? -1) == 0, ping)
 
         // ---- steering: refused, loudly ----------------------------------------
         // The send path is real. Under operator.read the gateway answers
@@ -846,10 +833,10 @@ enum Smoke {
             if view == "sessions" {
                 let txh = G["tx"] as? Int ?? -1
                 let fb = G["footBottom"] as? Int ?? -1
-                check("sessions: the ping bar is on screen", (G["ping"] as? Int ?? 0) > 0, m)
+                check("sessions: there is no ping bar — addressing is by typing @", (G["ping"] as? Int ?? -1) == 0, m)
                 check("sessions: the composer stays inside the window", fb > 0 && fb <= vp + 2, m)
-                check("sessions: the transcript keeps its floor WITH the ping bar", txh >= 200,
-                      "tx=\(txh) floor=200 ping=\(G["ping"] as? Int ?? 0) " + m)
+                check("sessions: the transcript keeps its floor", txh >= 200,
+                      "tx=\(txh) floor=200 " + m)
                 // The mirror assertion, and the reason the first fix here was
                 // wrong: the composer must not be silently clipped either. Its
                 // natural height is ~380px, so anything under 300 means the
@@ -1884,6 +1871,7 @@ enum Smoke {
           rooms:{
             'p-bridge':{
               paused:false, pauseReason:'', relaysInWindow:2,
+              access:['main','frontend-design','backend-design','coursework'],
               agents:[{id:'main',name:'Thuban',key:'agent:main:bridge:p-bridge'},
                       {id:'frontend-design',name:'Frontend Design',
                        key:'agent:frontend-design:bridge:p-bridge'},
@@ -1946,15 +1934,13 @@ enum Smoke {
         // the five-agent fixture: room, and four launched clones after main.
         check("the topbar carries the project's tabs while its room is open",
               (RM["navTabs"] as? Int ?? 0) == 5, roomDom)
-        // Five, because the ping bar offers the ACCESS LIST — everyone who may
-        // be handed work here — plus "no ping". Four of the five agents with
-        // access are pingable; main is not, because "no ping" already IS main.
-        // It is deliberately WIDER than the tab strip: pinging an agent that is
-        // allowed in but not launched is what launches it.
-        check("the same control renders in ping mode in the composer, over the access list",
-              (RM["pingTabs"] as? Int ?? 0) == 5, roomDom)
-        check("an unpinged message states that it goes to main alone",
-              (RM["noteText"] as? String ?? "").contains("main (Thuban) and to nobody else"), roomDom)
+        // No ping buttons in the room composer: you address a teammate by typing
+        // @<agent>, the same handle the relay parses out of a reply.
+        check("the room composer has no ping buttons",
+              (RM["pingTabs"] as? Int ?? -1) == 0, roomDom)
+        check("the composer explains that you address an agent by typing @",
+              (RM["noteText"] as? String ?? "").contains("Type @")
+              && (RM["noteText"] as? String ?? "").contains("main (Thuban)"), roomDom)
 
         // Geometry. The room has a taller composer than an agent pane — the ping
         // bar, the note, two metadata rows — which is the exact shape of the bug
@@ -1992,26 +1978,30 @@ enum Smoke {
               (RM["footBottom"] as? Int ?? -1) > 0 && (RM["footBottom"] as? Int ?? 0) <= rvp + 2, roomDom)
         check("room: nothing overflows horizontally", (RM["overflowX"] as? Int ?? 1) <= 0, roomDom)
 
-        // The brass, again — the requirement is the SAME control, so the ping
-        // bubble's selected state must be pixel-identical to a page-tab's.
+        // Addressing by typing @: the routing the ping buttons used to do is now
+        // parsed from the text at send time. Stub the bridge to capture what
+        // roomSend hands over, for an @-addressed message and a bare one.
         let roomPing = (try? await web.evaluateJavaScript("""
           (function(){
-            const b=[...document.querySelectorAll('.foot .ping-b')];
-            if (b.length>1) b[1].click();
-            const sel=document.querySelector('.foot .ping-b.is-active');
-            const nav=document.querySelector('#page-tabs .page-tab');
-            const cs=sel?getComputedStyle(sel):null, ns=nav?getComputedStyle(nav):null;
-            return JSON.stringify({ isPageTab: !!(sel&&sel.classList.contains('page-tab')),
-              ping: S.roomPing, note: (document.querySelector('.foot .note')||{}).textContent||'',
-              selBg: cs?cs.backgroundColor:'', navBg: ns?ns.backgroundColor:'' });
+            const sent=[]; const real=window.__bridgeSend;
+            window.__bridgeSend=(m)=>{ sent.push(m); return true; };
+            S.roomDraft='rate limit please @backend-design'; roomSend('p-bridge');
+            S.roomDraft='just a note for the room'; roomSend('p-bridge');
+            window.__bridgeSend=real;
+            const rs=sent.filter(x=>x.t==='room.send');
+            return JSON.stringify({
+              addressed: rs[0]?rs[0].ping:'MISSING',
+              bare: rs[1]?(rs[1].ping===null?'null':rs[1].ping):'MISSING',
+              note: (document.querySelector('.foot .note')||{}).textContent||'' });
           })()
         """)) as? String ?? "{}"
         let RP = (try? JSONSerialization.jsonObject(with: Data(roomPing.utf8))) as? [String: Any] ?? [:]
-        check("a selected ping bubble IS an Atlas page-tab", (RP["isPageTab"] as? Bool ?? false), roomPing)
-        check("selecting a bubble sets the ping target",
-              (RP["ping"] as? String ?? "") == "frontend-design", roomPing)
-        check("a pinged message states that main does not see it",
-              (RP["note"] as? String ?? "").contains("main does not see it"), roomPing)
+        check("typing @backend-design addresses that agent",
+              (RP["addressed"] as? String ?? "") == "backend-design", roomPing)
+        check("a message with no @ goes to main",
+              (RP["bare"] as? String ?? "") == "null", roomPing)
+        check("the composer note explains the @ convention",
+              (RP["note"] as? String ?? "").contains("Type @"), roomPing)
 
         // ---- questions: the real record, the real two ids ---------------------
         let qFixture = """
