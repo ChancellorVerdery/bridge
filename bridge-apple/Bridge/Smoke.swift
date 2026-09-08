@@ -135,6 +135,29 @@ enum Smoke {
         """)) as? String ?? "nil"
         check("deleting a course via the confirm modal actually removes it", studyDelete == "deleted", studyDelete)
 
+        // ---- study data persists across the native bridge, not localStorage --
+        // The WebView is ephemeral (.nonPersistent), so a boot 'studyStore' push
+        // must seed localStorage and every saveStudy must mirror back out to the
+        // native store. Exercise both halves of that wiring. Snapshot + restore
+        // the store so a real bank is untouched.
+        let studyPersist = (try? await web.evaluateJavaScript("""
+          (function(){
+            var KEY='bridge.study.v1'; var saved=localStorage.getItem(KEY);
+            var captured=null; var orig=window.__studyPersist; window.__studyPersist=function(s){captured=s;};
+            try {
+              window.__bridgeEmit({type:'studyStore', data: JSON.stringify({tabs:[{id:'t9',name:'Seeded'}],active:'t9'})});
+              var seededOk = (((JSON.parse(localStorage.getItem(KEY))||{}).tabs||[])[0]||{}).name === 'Seeded';
+              window.Study.saveStudy({tabs:[{id:'t9',name:'Seeded',chat:[]}],active:'t9'});
+              var mirroredOk = typeof captured==='string' && captured.indexOf('Seeded')>=0;
+              return (seededOk && mirroredOk) ? 'ok' : ('seed='+seededOk+' mirror='+mirroredOk);
+            } finally {
+              window.__studyPersist=orig;
+              if (saved===null) localStorage.removeItem(KEY); else localStorage.setItem(KEY, saved);
+            }
+          })()
+        """)) as? String ?? "nil"
+        check("study store seeds from + mirrors to the native bridge", studyPersist == "ok", studyPersist)
+
         // ---- a request id is an idempotency key, so it must survive a relaunch --
         //
         // Swift passes this id to the gateway verbatim as chat.send's

@@ -212,6 +212,10 @@ final class Shell: ObservableObject {
             // user's own projects and rosters rather than defaults that then
             // flicker away — and so a project made last week is simply there.
             pushPrefs()
+            // The Study tool's data lives in Bridge's own file store, not the
+            // ephemeral WebView — hand it over on boot so its courses survive a
+            // relaunch the same way projects do.
+            pushStudyStore()
             // …and the room, which is persisted the same way and for the same
             // reason: the main chat is a thread, not a session log, and it has
             // to be there when the window opens rather than after the gateway
@@ -334,9 +338,20 @@ final class Shell: ObservableObject {
         case "reconnect":
             Gateway.shared.reconnectNow()
 
+        case "studyStore":
+            // The Study tool sends its WHOLE store as a JSON string on every
+            // change. It is local only — never forwarded to the gateway — so a
+            // question bank and its chat stay on this Mac.
+            guard let data = body["data"] as? String else { return }
+            StudyStore.save(data)
+
         default:
             break
         }
+    }
+
+    func pushStudyStore() {
+        ActiveWebView.shared.emit(["type": "studyStore", "data": StudyStore.load()])
     }
 
     func pushPrefs() {

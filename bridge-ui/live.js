@@ -1405,6 +1405,16 @@ window.__bridgeEmit = function (msg) {
         break;
       }
 
+      case 'studyStore': {
+        // The Study tool's data, from Bridge's own file store. The WebView is
+        // ephemeral, so localStorage would be wiped on every quit — seed it here
+        // on boot so loadStudy() finds the user's courses, and refresh the study
+        // page if it is already open.
+        try { if (typeof msg.data === 'string' && msg.data) localStorage.setItem('bridge.study.v1', msg.data); } catch { /* storage blocked */ }
+        if (window.StudyUI && typeof window.StudyUI.reload === 'function') window.StudyUI.reload();
+        break;
+      }
+
       case 'agents':
         LIVE.agents = (msg.agents || []).slice().sort((a, b) => {
           // main first — it is the one every unpinged message goes to — then
@@ -1818,6 +1828,11 @@ window.StudyAI = {
     return { verdicts: obj.verdicts };
   },
 };
+
+/* The study store rides Bridge's native file store, not the ephemeral WebView:
+   study.js calls this on every save so a question bank survives a relaunch. The
+   boot 'studyStore' push (above) seeds localStorage the other direction. */
+window.__studyPersist = function (str) { bridgeSend({ t: 'studyStore', data: String(str || '') }); };
 
 function onComposerKey(ev, a) {
   // Hold space to talk, under the same arming rule as the room composer: only

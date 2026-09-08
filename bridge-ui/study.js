@@ -114,7 +114,11 @@
 
   function saveStudy(s) {
     for (const t of s.tabs) if (t.chat.length > 60) t.chat = t.chat.slice(-60); // cap transcripts
-    localStorage.setItem(KEY, JSON.stringify(s));
+    const str = JSON.stringify(s);
+    localStorage.setItem(KEY, str);
+    // Mirror to Bridge's native file store — the WebView is ephemeral, so this
+    // (not localStorage) is what actually survives a relaunch.
+    if (typeof window.__studyPersist === 'function') window.__studyPersist(str);
   }
 
   const newTab = (name) => normTab({ name });

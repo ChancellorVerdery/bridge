@@ -796,6 +796,9 @@
     // to rebuild (the page renders on its own actions and awaited gateway
     // turns), but keep the hook so app.js has a stable contract.
     sync() { /* intentionally light — see attach() */ },
+    // The native store arrived (boot seed / reconnect) after the page mounted —
+    // re-render so the freshly-seeded localStorage is reflected.
+    reload() { if (pageRoot && pageRoot.isConnected) render(); },
     mounted() { return !!(pageRoot && pageRoot.isConnected); },
     toolId() { return toolId; },
   };

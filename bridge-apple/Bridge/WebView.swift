@@ -181,7 +181,8 @@ struct BridgeWebView: NSViewRepresentable {
             // shown; voice carries "start" or "stop" and nothing else. None
             // returns a secret and none carries one.
             case "prefs", "send", "abort", "settings", "reconnect",
-                 "room.send", "room.pause", "room.clear", "question.resolve", "voice":
+                 "room.send", "room.pause", "room.clear", "question.resolve", "voice",
+                 "studyStore":
                 Self.onMessage?(body)
             default:
                 break

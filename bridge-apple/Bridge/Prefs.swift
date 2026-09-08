@@ -490,3 +490,20 @@ struct Prefs: Codable, Equatable {
         return try? JSONDecoder().decode(Prefs.self, from: data)
     }
 }
+
+/// The Study tool's data store — the whole `bridge.study.v1` document as an
+/// opaque JSON string the web layer owns. Kept in Bridge's own directory so it
+/// survives a relaunch: the WebView is deliberately ephemeral
+/// (`.nonPersistent()`), so localStorage alone would be wiped on every quit.
+/// LOCAL ONLY — unlike prefs it is never forwarded to the gateway; a question
+/// bank and its tutor chat stay on this Mac.
+enum StudyStore {
+    static var url: URL { Prefs.directory.appendingPathComponent("study.json") }
+    static func load() -> String { (try? String(contentsOf: url, encoding: .utf8)) ?? "" }
+    static func save(_ s: String) {
+        do {
+            try FileManager.default.createDirectory(at: Prefs.directory, withIntermediateDirectories: true)
+            try s.write(to: url, atomically: true, encoding: .utf8)
+        } catch { NSLog("bridge: study store save failed: \(error.localizedDescription)") }
+    }
+}
