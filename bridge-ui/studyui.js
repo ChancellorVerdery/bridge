@@ -53,6 +53,10 @@
       try {
         const MF = window.MathLive && window.MathLive.MathfieldElement;
         if (MF) { MF.fontsDirectory = null; MF.soundsDirectory = null; }
+        // Trim the virtual keyboard to math-only layers. Every device already
+        // has letters and digits on its physical keyboard, so the VK only needs
+        // the symbols and Greek it can't type — not the numeric/qwerty layouts.
+        if (window.mathVirtualKeyboard) window.mathVirtualKeyboard.layouts = ['symbols', 'greek'];
       } catch { /* older builds expose it differently; the CSS still covers fonts */ }
     })();
     return depsPromise;
@@ -550,6 +554,36 @@
     if (overlay) { overlay.remove(); overlay = null; }
     ui.modal = null;
   }
+
+  /* ---- confirm-deletion modal ----
+     WKWebView here implements no runJavaScriptConfirmPanel, so window.confirm()
+     just returns false and a native confirm never appears — which is why the
+     delete buttons "did nothing". Route deletes through this in-page modal. */
+  let confirmOverlay = null;
+  function closeConfirm() { if (confirmOverlay) { confirmOverlay.remove(); confirmOverlay = null; } }
+  function askConfirm(message, onYes) {
+    closeConfirm();
+    confirmOverlay = document.createElement('div');
+    confirmOverlay.className = 'st-overlay st-overlay--confirm';
+    confirmOverlay.innerHTML = `<div class="st-panel st-panel--sm"><div class="st-confirm">
+      <p>${esc(message)}</p>
+      <div class="st-confirm__acts">
+        <button type="button" class="st-btn st-btn--ghost" data-cf="no">Cancel</button>
+        <button type="button" class="st-btn st-btn--danger" data-cf="yes">Delete</button>
+      </div>
+    </div></div>`;
+    confirmOverlay.addEventListener('click', (e) => {
+      if (e.target === confirmOverlay) { closeConfirm(); return; } // click the backdrop = cancel
+      const b = e.target.closest('[data-cf]');
+      if (!b) return;
+      const yes = b.dataset.cf === 'yes';
+      closeConfirm();
+      if (yes) onYes();
+    });
+    document.body.appendChild(confirmOverlay);
+    const yesBtn = confirmOverlay.querySelector('[data-cf="yes"]');
+    if (yesBtn) yesBtn.focus();
+  }
   function renderModal() {
     if (!overlay || !ui.modal) return;
     overlay.innerHTML = `<div class="st-panel">
@@ -650,8 +684,11 @@
       case 'tab-rename': { ui.rename = id; render(); break; }
       case 'tab-del': {
         e.stopPropagation();
-        if (!confirm('Delete this course and its question bank and chat?')) break;
-        const s2 = D.loadStudy(); s2.tabs = s2.tabs.filter((x) => x.id !== id); if (s2.active === id) s2.active = s2.tabs[0]?.id || ''; D.saveStudy(s2); render(); break;
+        const doomed = D.loadStudy().tabs.find((x) => x.id === id);
+        askConfirm('Delete “' + (doomed ? doomed.name : 'this course') + '”? Its question bank and tutor chat go with it. This cannot be undone.', () => {
+          const s2 = D.loadStudy(); s2.tabs = s2.tabs.filter((x) => x.id !== id); if (s2.active === id) s2.active = s2.tabs[0]?.id || ''; D.saveStudy(s2); render();
+        });
+        break;
       }
       case 'tool': { ui.tool = t.dataset.tool === 'bank' ? 'bank' : 'study'; render(); break; }
       case 'chat-send': { const inp = pageRoot.querySelector('#st-chat-in'); await doSend(inp ? inp.value : ''); break; }
@@ -662,7 +699,12 @@
       case 'q-close': { const s2 = D.loadStudy(); const tb = curTab(s2); if (tb) { tb.activeQ = null; D.saveStudy(s2); render(); } break; }
       case 'q-add': { openModal({ id: null, draft: blankDraft(), error: '' }); break; }
       case 'q-edit': { const q = tab && tab.questions.find((x) => x.id === id); if (q) openModal({ id: q.id, draft: draftFromQ(q), error: '' }); break; }
-      case 'q-del': { if (!confirm('Delete this question?')) break; const s2 = D.loadStudy(); const tb = curTab(s2); if (tb) { tb.questions = tb.questions.filter((x) => x.id !== id); D.saveStudy(s2); render(); } break; }
+      case 'q-del': {
+        askConfirm('Delete this question from the bank? This cannot be undone.', () => {
+          const s2 = D.loadStudy(); const tb = curTab(s2); if (tb) { tb.questions = tb.questions.filter((x) => x.id !== id); D.saveStudy(s2); render(); }
+        });
+        break;
+      }
       default: break;
     }
   }
@@ -720,6 +762,7 @@
   /* ───────────── document-level key handling ───────────── */
 
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && confirmOverlay) { e.preventDefault(); closeConfirm(); return; }
     if (!pageRoot) return;
     if (e.target.id === 'st-chat-in' && e.key === 'Enter') { e.preventDefault(); doSend(e.target.value); return; }
     if (e.target.id === 'st-rename') {

@@ -108,6 +108,33 @@ enum Smoke {
         )) as? String ?? "nil"
         check("StudyUI.attach renders without throwing", studyRender == "ok", studyRender)
 
+        // ---- deleting a course goes through the in-page confirm modal ---------
+        // The delete "did nothing" because this WKWebView has no confirm panel,
+        // so window.confirm() returned false. Deletes now open an in-page modal;
+        // clicking its Delete must actually remove the course. Snapshot + restore
+        // the study store so a real course bank is never touched.
+        let studyDelete = (try? await web.evaluateJavaScript("""
+          (function(){
+            var KEY='bridge.study.v1'; var saved=localStorage.getItem(KEY);
+            try {
+              localStorage.setItem(KEY, JSON.stringify({tabs:[{id:'t1',name:'Calc'}],active:'t1'}));
+              var d=document.createElement('div'); document.body.appendChild(d);
+              window.StudyUI.attach(d,{toolId:'t-study'});
+              var x=d.querySelector('.st-tab.is-active .st-tab__x'); if(!x) return 'no-x';
+              x.click();
+              var yes=document.querySelector('.st-overlay--confirm [data-cf="yes"]'); if(!yes) return 'no-modal';
+              yes.click();
+              var n=(JSON.parse(localStorage.getItem(KEY)).tabs||[]).length;
+              d.remove();
+              return n===0 ? 'deleted' : ('left:'+n);
+            } finally {
+              document.querySelectorAll('.st-overlay').forEach(function(o){o.remove();});
+              if (saved===null) localStorage.removeItem(KEY); else localStorage.setItem(KEY, saved);
+            }
+          })()
+        """)) as? String ?? "nil"
+        check("deleting a course via the confirm modal actually removes it", studyDelete == "deleted", studyDelete)
+
         // ---- a request id is an idempotency key, so it must survive a relaunch --
         //
         // Swift passes this id to the gateway verbatim as chat.send's
