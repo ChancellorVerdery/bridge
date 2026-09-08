@@ -95,6 +95,19 @@ enum Smoke {
         )) as? Bool ?? false
         check("Study tool scripts load and expose Study / StudyAI / StudyUI", studyWired)
 
+        // ---- StudyUI actually renders (not just parses) -----------------------
+        // Attach the study page to a throwaway node and confirm it produces DOM.
+        // render() guards on depsReady() and falls back to plain text before the
+        // vendored MathLive/marked land, so this exercises the render path
+        // without a window and without waiting on the lazy libs.
+        let studyRender = (try? await web.evaluateJavaScript(
+            "(function(){try{var d=document.createElement('div');document.body.appendChild(d);"
+            + "window.StudyUI.attach(d,{toolId:'t-smoke'});"
+            + "var ok=!!d.querySelector('.st-empty, .st-tabs');d.remove();return ok?'ok':'no-dom';}"
+            + "catch(e){return 'ERR:'+(e&&e.message);}})()"
+        )) as? String ?? "nil"
+        check("StudyUI.attach renders without throwing", studyRender == "ok", studyRender)
+
         // ---- a request id is an idempotency key, so it must survive a relaunch --
         //
         // Swift passes this id to the gateway verbatim as chat.send's
