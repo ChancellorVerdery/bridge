@@ -1,0 +1,26 @@
+# Bridge relay — systemd USER unit on the gateway host (the home server).
+# Install:  cp bridge-relay.service ~/.config/systemd/user/ && systemctl --user daemon-reload
+#           systemctl --user enable --now bridge-relay.service
+# Logs:     journalctl --user -u bridge-relay -f
+#
+# Enabling this service goes hand in hand with disabling Room.swift's relayPings
+# on the Mac (see DEPLOY.md). Running both routers at once delivers every
+# agent-to-agent hand-off twice.
+
+[Unit]
+Description=Bridge relay: routes @pings between agent clones inside a project
+After=openclaw-gateway.service
+Wants=openclaw-gateway.service
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+ExecStart=/usr/bin/node /home/user/bridge-relay/relay.mjs
+WorkingDirectory=/home/user/bridge-relay
+Restart=always
+RestartSec=5
+Environment=HOME=/home/user
+Environment=BRIDGE_RELAY_STATE=/home/user/bridge-relay/state.json
+
+[Install]
+WantedBy=default.target

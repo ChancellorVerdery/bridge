@@ -3491,3 +3491,62 @@ because `__focusReal` could no longer find an agent tab). `clones` is now
   first two.
 * The `onkeyup`/`onblur` audit pass 9 named. Seven passes on.
 * The 760px transcript-floor-vs-composer decision. Still his.
+
+# Pass 16 — the relay moves to the gateway host, 2026-09-08
+
+The room routed only while the Mac app was open, because Room.swift is the
+router. This pass builds the same router as an always-on service on the gateway
+host (`bridge-relay/`), so a lane can hand work to a teammate with no laptop
+awake — which is what "an agent can ping another even if it is not running" asks
+for.
+
+## What was measured on the live gateway before a line was written
+
+* A loopback `cli/cli` connection carrying the shared `gateway.auth.token` keeps
+  its operator scopes **with no device pairing** (`shouldPreserveLocalCliShared-
+  AuthScopes`). So the relay needs no keychain, no approval, no second `~/.ssh` —
+  it reads the token from the config beside it and dials `127.0.0.1:18789`.
+* `sessions.create`, `sessions.patch`, `chat.send`, `chat.history` answer under
+  `operator.write`; `sessions.delete` and `chat.inject` need `operator.admin`.
+  The relay holds read+write only and calls neither admin method.
+* `chat.send` to a key that does not exist creates the session and runs a turn —
+  so a ping to a never-launched clone brings it into being, no provisioning.
+* CLONES SHARING SOUL/USER/AGENTS/MEMORY IS ALREADY NATIVE. Every clone of an
+  agent is a session on that agent's ONE workspace, so those files are shared by
+  construction. The relay does not implement this; the session-key design did.
+
+## What the relay is, and is not
+
+IS: the agent→agent delivery, always on, with Room.swift's ceilings ported
+verbatim — 6-hop, 14-relays-per-5-min-per-project, first-sight seeding, the
+standing preamble re-anchored every 20 turns, isolation enforced at deliver().
+Membership lives in `state.json` (`projects.<id>.access`), hot-reloaded on write,
+seeded here from the Mac's prefs.json.
+
+IS NOT: a second transcript, and not the handler of Chancellor's own messages.
+The Mac still sends those and still displays the room. Exactly one router may run
+per turn — see `bridge-relay/DEPLOY.md`: enabling the service is COUPLED to
+gating Room.swift's `relayPings` to a no-op. Both running double-delivers.
+
+## Verified
+
+* `node relay.mjs --selftest` — 15 routing assertions (key/route/ping-parse/
+  plainText/preamble), green on the Mac and on the host (node v24.20).
+* A bounded live run on the host: connected, `hello-ok scopes=[read,write]`,
+  cached names via `agents.list`, subscribed to all 9 sessions across 3 projects,
+  seeded every high-water mark, relayed nothing on first sight.
+* Service installed at `~/.config/systemd/user/bridge-relay.service`, DISABLED —
+  deliberately, until the Mac switch lands, so nothing double-routes.
+* Two throwaway test sessions (`…:bridge:relaytest`, `…:bridge:probe`) deleted
+  from the gateway.
+
+## Not done, and why
+
+* A full agent→agent chain end to end. It spends real model turns and the clones
+  have real tool access, so it wants Chancellor watching — run with the Mac
+  switch in.
+* The Mac switch itself (gate `relayPings`, rebuild the app). Not done unattended:
+  it rebuilds and reinstalls the app on his desk. DEPLOY.md has the one-line diff.
+* The Mac project editor writing `state.json`. Today it is seeded from prefs.json;
+  the relay hot-reloads it, so an edit works now — wiring the editor to write it
+  is the follow-on.

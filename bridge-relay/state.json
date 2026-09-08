@@ -1,0 +1,27 @@
+{
+  "projects": {
+    "g-bridge": {
+      "name": "Bridge",
+      "access": [
+        "frontend-design",
+        "main",
+        "cybersecurity",
+        "backend-design",
+        "full-stack",
+        "linux-expert",
+        "macos-expert"
+      ]
+    },
+    "g-atlas": {
+      "name": "Atlas",
+      "access": [
+        "main"
+      ]
+    },
+    "p-shotempty": {
+      "name": "Empty Project",
+      "access": []
+    }
+  },
+  "rooms": {}
+}
