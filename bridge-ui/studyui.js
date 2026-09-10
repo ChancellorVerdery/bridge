@@ -605,7 +605,7 @@
 
   function uploadHTML(m) {
     return `
-      <p class="st-note">Pick a file or paste text, and the tutor pulls practice questions from it into this course's bank. Text files (.txt/.md/.csv/.tex) and pasted text work now. PDFs, images, and Word docs — and the figures inside them — need the tutor to receive the file itself, which isn't wired to the gateway yet; paste their text for now.</p>
+      <p class="st-note">Pick a file or paste text, and the tutor pulls practice questions into this course's bank. Text and saved web pages — .txt, .md, .html, and .mhtml (a page saved from your browser, e.g. WebAssign) — work now; the tutor reads their text. PDFs, images, Word docs, and the figures embedded in any file need the tutor to receive the file itself, which the gateway send can't do yet; paste their text for now.</p>
       <div class="st-uprow">
         <button type="button" class="st-btn st-btn--ghost st-btn--sm" data-st="up-pick">Choose file…</button>
         <input type="file" id="st-file-input" multiple hidden>
@@ -658,19 +658,60 @@
     if (tab) { m.items.forEach((q, i) => { if (m.chosen.has(i)) tab.questions.push(D.normQuestion(q)); }); D.saveStudy(s); }
     closeModal(); render();
   }
+  // Text-based files we can read in the page and hand to the tutor. .mhtml/.html
+  // (e.g. a saved WebAssign page) count — they're text, and the questions live
+  // in their HTML. Truly binary files (PDF/image/Word) still need the tutor to
+  // receive the file itself (a gateway capability we don't have), so they're
+  // skipped with a note.
+  const TEXT_RE = /\.(txt|md|markdown|csv|tsv|tex|log|json|xml|html?|mht|mhtml|eml)$/i;
+
+  // Quoted-printable → text (MHTML/EML encode their HTML this way).
+  const decodeQP = (s) => String(s).replace(/=\r?\n/g, '').replace(/=([0-9A-Fa-f]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+
+  // Pull the text/html MIME part out of an MHTML/EML container, decoding QP and
+  // dropping the sibling base64 image parts (we cut at the next boundary).
+  function mhtmlToHtml(s) {
+    const idx = s.search(/content-type:\s*text\/html/i);
+    if (idx < 0) return s;
+    let body = s.slice(idx);
+    const gap = body.search(/\r?\n\r?\n/);
+    const headers = gap < 0 ? body : body.slice(0, gap);
+    body = gap < 0 ? '' : body.slice(gap + (body.slice(gap).startsWith('\r\n\r\n') ? 4 : 2));
+    const end = body.search(/\r?\n----+/);
+    if (end > 0) body = body.slice(0, end);
+    return /content-transfer-encoding:\s*quoted-printable/i.test(headers) ? decodeQP(body) : body;
+  }
+
+  // Reduce a picked text file to the readable question text the tutor should see.
+  function readableText(name, raw) {
+    let s = String(raw || '');
+    const lower = String(name).toLowerCase();
+    if (/\.(mhtml?|eml)$/.test(lower) || /content-type:\s*multipart\//i.test(s.slice(0, 4000))) s = mhtmlToHtml(s);
+    if (/\.(mhtml?|html?|eml)$/.test(lower) || /<html[\s>]/i.test(s.slice(0, 4000))) {
+      try {
+        const doc = new DOMParser().parseFromString(s, 'text/html');
+        doc.querySelectorAll('script,style,noscript,svg').forEach((n) => n.remove());
+        s = (doc.body || doc.documentElement).textContent || s;
+      } catch { /* leave as-is */ }
+    }
+    return s.replace(/[A-Za-z0-9+/]{300,}={0,2}/g, ' ') // strip leftover base64 blobs
+      .replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
+      .slice(0, 200000); // keep the turn a sane size
+  }
+
   function onFiles(list) {
     if (!ui.modal || ui.modal.type !== 'upload') return;
     let pending = 0; const bad = [];
     for (const f of list) {
-      if (/\.(txt|md|csv|tex)$/i.test(f.name) || (f.type || '').startsWith('text/')) {
+      if (TEXT_RE.test(f.name) || (f.type || '').startsWith('text/') || /html|xml|json|mhtml|message\//i.test(f.type || '')) {
         pending++;
         const r = new FileReader();
-        r.onload = () => { ui.modal.text = (ui.modal.text ? ui.modal.text + '\n\n' : '') + String(r.result || ''); if (!--pending) renderModal(); };
+        r.onload = () => { const t = readableText(f.name, r.result); if (t) ui.modal.text = (ui.modal.text ? ui.modal.text + '\n\n' : '') + t; if (!--pending) renderModal(); };
         r.onerror = () => { if (!--pending) renderModal(); };
         r.readAsText(f);
       } else bad.push(f.name);
     }
-    ui.modal.error = bad.length ? 'Skipped (paste the text instead): ' + bad.join(', ') : '';
+    ui.modal.error = bad.length ? bad.join(', ') + ' — that file type needs the tutor to receive the file (PDF/image/Word); paste its text instead.' : '';
     if (!pending) renderModal();
   }
   const KINDS = [['math', 'Math'], ['text', 'Text'], ['choice', 'Multiple choice']];
@@ -904,5 +945,7 @@
     reload() { if (pageRoot && pageRoot.isConnected) render(); },
     mounted() { return !!(pageRoot && pageRoot.isConnected); },
     toolId() { return toolId; },
+    // Exposed so smoke can verify the .mhtml/.html → question-text extraction.
+    readableText,
   };
 })();

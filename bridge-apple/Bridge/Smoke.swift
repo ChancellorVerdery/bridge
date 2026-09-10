@@ -185,6 +185,26 @@ enum Smoke {
         """)) as? String ?? "nil"
         check("study wrapper avoids the .st badge collision + upload modal opens", studyUI == "ok", studyUI)
 
+        // ---- an uploaded .mhtml is read to question text (not skipped) --------
+        // A saved WebAssign page is MIME/quoted-printable HTML with base64 images.
+        // readableText must pull the HTML part, decode QP (=3D -> =), strip the
+        // base64 image part, and hand back the question text for the tutor.
+        let studyMhtml = (try? await web.evaluateJavaScript("""
+          (function(){
+            var B="----=_Part";
+            var mh=["MIME-Version: 1.0","Content-Type: multipart/related; boundary="+B,"",
+              "--"+B,"Content-Type: text/html","Content-Transfer-Encoding: quoted-printable","",
+              "<html><body><h1>Problem 1</h1><p>Solve x=3D2 for x.</p></body></html>",
+              "--"+B,"Content-Type: image/png","Content-Transfer-Encoding: base64","",
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==",
+              "--"+B+"--"].join("\\r\\n");
+            var out=window.StudyUI.readableText("hw.mhtml", mh);
+            var ok = out.indexOf("Problem 1")>=0 && out.indexOf("Solve x=2")>=0 && out.indexOf("iVBORw0")<0;
+            return ok ? "ok" : ("out="+out.replace(/\\s+/g," ").slice(0,140));
+          })()
+        """)) as? String ?? "nil"
+        check("an uploaded .mhtml is parsed to question text, base64 stripped", studyMhtml == "ok", studyMhtml)
+
         // ---- a request id is an idempotency key, so it must survive a relaunch --
         //
         // Swift passes this id to the gateway verbatim as chat.send's
