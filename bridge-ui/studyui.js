@@ -605,10 +605,10 @@
 
   function uploadHTML(m) {
     return `
-      <p class="st-note">Paste problem text — or add plain-text files (.txt, .md, .csv, .tex) — and the tutor pulls practice questions from it into this course's bank. PDFs and images aren't supported yet, so paste their text.</p>
+      <p class="st-note">Pick a file or paste text, and the tutor pulls practice questions from it into this course's bank. Text files (.txt/.md/.csv/.tex) and pasted text work now. PDFs, images, and Word docs — and the figures inside them — need the tutor to receive the file itself, which isn't wired to the gateway yet; paste their text for now.</p>
       <div class="st-uprow">
-        <button type="button" class="st-btn st-btn--ghost st-btn--sm" data-st="up-pick">Add text files…</button>
-        <input type="file" id="st-file-input" accept=".txt,.md,.csv,.tex,text/*" multiple hidden>
+        <button type="button" class="st-btn st-btn--ghost st-btn--sm" data-st="up-pick">Choose file…</button>
+        <input type="file" id="st-file-input" multiple hidden>
       </div>
       <textarea class="st-field" data-stf="uptext" rows="8" placeholder="Paste material here…">${esc(m.text || '')}</textarea>
       ${m.error ? `<p class="st-err">${esc(m.error)}</p>` : ''}
@@ -779,7 +779,14 @@
       case 'q-keep': { keepGenerated(); break; }
       case 'q-close': { const s2 = D.loadStudy(); const tb = curTab(s2); if (tb) { tb.activeQ = null; D.saveStudy(s2); render(); } break; }
       case 'q-add': { openModal({ id: null, draft: blankDraft(), error: '' }); break; }
-      case 'up-open': { openModal({ type: 'upload', text: '', busy: false, error: '' }); break; }
+      case 'up-open': {
+        openModal({ type: 'upload', text: '', busy: false, error: '' });
+        // Bring up the file chooser straight away — the button says "Upload".
+        // (Same user gesture, so the native open panel is allowed.)
+        const inp = overlay && overlay.querySelector('#st-file-input');
+        if (inp) inp.click();
+        break;
+      }
       case 'q-edit': { const q = tab && tab.questions.find((x) => x.id === id); if (q) openModal({ id: q.id, draft: draftFromQ(q), error: '' }); break; }
       case 'q-del': {
         askConfirm('Delete this question from the bank? This cannot be undone.', () => {

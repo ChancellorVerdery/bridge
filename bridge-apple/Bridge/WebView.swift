@@ -1,5 +1,6 @@
 import SwiftUI
 import WebKit
+import AppKit
 
 // The WKWebView that is the app, pointed at the local server's origin, plus the
 // one-way channel Gateway pushes through.
@@ -187,6 +188,22 @@ struct BridgeWebView: NSViewRepresentable {
             default:
                 break
             }
+        }
+
+        // A page <input type="file"> can't open anything without this — WKWebView
+        // shows no file chooser unless its UI delegate provides one, which is why
+        // the Study tool's "Add files…" did nothing. Native NSOpenPanel, files
+        // only, honouring the input's multiple flag. Nothing about the file is
+        // read here; the page reads the chosen file(s) itself via FileReader.
+        func webView(_ webView: WKWebView,
+                     runOpenPanelWith parameters: WKOpenPanelParameters,
+                     initiatedByFrame frame: WKFrameInfo,
+                     completionHandler: @escaping ([URL]?) -> Void) {
+            let panel = NSOpenPanel()
+            panel.allowsMultipleSelection = parameters.allowsMultipleSelection
+            panel.canChooseFiles = true
+            panel.canChooseDirectories = false
+            panel.begin { completionHandler($0 == .OK ? panel.urls : nil) }
         }
 
         // Bridge never navigates away from its own origin, and never opens a
