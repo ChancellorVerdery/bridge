@@ -212,7 +212,7 @@
     }
     const tab = curTab(s);
     const views = { study: studyView, bank: bankView };
-    pageRoot.innerHTML = `<div class="st">
+    pageRoot.innerHTML = `<div class="stu">
       ${tabsBar(s)}
       ${toolsBar(tab)}
       <div class="st-view">${(views[ui.tool] || studyView)(tab, s)}</div>
@@ -226,7 +226,7 @@
   }
 
   function emptyHTML() {
-    return `<div class="st st--empty">
+    return `<div class="stu stu--empty">
       <div class="st-empty">
         <b>No courses yet.</b>
         <p>Add a course to start a question bank and a tutor chat for it.</p>
@@ -503,7 +503,8 @@
     return `<div class="st-bank">
       <div class="st-banktools">
         <button type="button" class="st-btn" data-st="q-add">+ Add question</button>
-        <span class="st-note">AI extraction from uploaded files is not available in Bridge yet (the gateway send carries text only). Author questions here — the tutor grades them.</span>
+        <button type="button" class="st-btn st-btn--ghost" data-st="up-open">Upload material</button>
+        <span class="st-note">Add questions by hand, or paste/upload text and let the tutor extract them.</span>
       </div>
       ${tab.questions.length ? cats.map((c) => catSection(c, byCat[c], tab.catStats[c])).join('') : '<div class="st-empty"><b>This bank is empty.</b><p>Add a question, or ask the tutor to <b>Quiz me</b> once there is one.</p></div>'}
     </div>`;
@@ -586,11 +587,91 @@
   }
   function renderModal() {
     if (!overlay || !ui.modal) return;
+    const m = ui.modal;
+    const title = m.type === 'upload' ? 'Upload material'
+      : m.type === 'review' ? 'Review extracted questions'
+        : (m.id ? 'Edit question' : 'Add question');
+    const body = m.type === 'upload' ? uploadHTML(m)
+      : m.type === 'review' ? reviewHTML(m)
+        : qEditorHTML(m);
     overlay.innerHTML = `<div class="st-panel">
-      <div class="st-panel__head"><b>${ui.modal.id ? 'Edit question' : 'Add question'}</b><button type="button" class="st-iconbtn" data-st="m-close" aria-label="Close">×</button></div>
-      <div class="st-panel__body">${qEditorHTML(ui.modal)}</div>
+      <div class="st-panel__head"><b>${title}</b><button type="button" class="st-iconbtn" data-st="m-close" aria-label="Close">×</button></div>
+      <div class="st-panel__body">${body}</div>
     </div>`;
     if (depsReady()) { tuneMathFields(overlay); fitEquations(overlay); }
+  }
+
+  /* ---- upload material → tutor extracts questions → review → import ---- */
+
+  function uploadHTML(m) {
+    return `
+      <p class="st-note">Paste problem text — or add plain-text files (.txt, .md, .csv, .tex) — and the tutor pulls practice questions from it into this course's bank. PDFs and images aren't supported yet, so paste their text.</p>
+      <div class="st-uprow">
+        <button type="button" class="st-btn st-btn--ghost st-btn--sm" data-st="up-pick">Add text files…</button>
+        <input type="file" id="st-file-input" accept=".txt,.md,.csv,.tex,text/*" multiple hidden>
+      </div>
+      <textarea class="st-field" data-stf="uptext" rows="8" placeholder="Paste material here…">${esc(m.text || '')}</textarea>
+      ${m.error ? `<p class="st-err">${esc(m.error)}</p>` : ''}
+      <div class="st-panel__acts">
+        <button type="button" class="st-btn" data-st="up-extract" ${m.busy || !aiOn() ? 'disabled' : ''}>${m.busy ? 'Extracting…' : 'Extract questions'}</button>
+      </div>
+      ${aiOn() ? '' : '<p class="st-note">The tutor (coursework agent) is offline — connect the gateway to extract.</p>'}`;
+  }
+
+  function reviewItemHTML(q, i, chosen) {
+    return `<label class="st-rev">
+      <input type="checkbox" data-st-rev="${i}"${chosen ? ' checked' : ''}>
+      <span class="st-rev__body">
+        <span class="st-cat">${esc(q.category)}</span>
+        ${q.intro ? `<span class="st-qintro">${stMD(q.intro)}</span>` : ''}
+        ${q.parts.map((p) => `<span class="st-ans"><span class="st-ans__a">${partAnswerHTML(p)}</span><span class="st-ans__rule">${esc(ruleBadge(p))}</span></span>`).join('')}
+      </span>
+    </label>`;
+  }
+  function reviewHTML(m) {
+    return `
+      <p class="st-note">${m.items.length ? 'Uncheck anything you don\'t want, then import.' : 'The tutor found no usable questions in that material.'}</p>
+      <div class="st-revlist">${m.items.map((q, i) => reviewItemHTML(q, i, m.chosen.has(i))).join('')}</div>
+      <div class="st-panel__acts">
+        ${m.items.length ? `<button type="button" class="st-btn" data-st="rv-import">Import ${m.chosen.size} selected</button>` : ''}
+      </div>`;
+  }
+
+  async function enqueueExtract() {
+    const m = ui.modal; if (!m || m.busy) return;
+    const text = String(m.text || '').trim();
+    if (!text) { m.error = 'Paste some material or add a text file first.'; renderModal(); return; }
+    if (!aiOn()) { m.error = 'The tutor is offline.'; renderModal(); return; }
+    m.busy = true; m.error = ''; renderModal();
+    try {
+      const res = await AI().extract(text);
+      const items = (Array.isArray(res && res.questions) ? res.questions : []).map(D.normQuestion);
+      ui.modal = { type: 'review', items, chosen: new Set(items.map((_, i) => i)) };
+      renderModal();
+    } catch (err) {
+      if (ui.modal) { ui.modal.busy = false; ui.modal.error = 'Extract failed: ' + (err && err.message ? err.message : String(err)); renderModal(); }
+    }
+  }
+  function importReviewed() {
+    const m = ui.modal; if (!m || m.type !== 'review') return;
+    const s = D.loadStudy(); const tab = curTab(s);
+    if (tab) { m.items.forEach((q, i) => { if (m.chosen.has(i)) tab.questions.push(D.normQuestion(q)); }); D.saveStudy(s); }
+    closeModal(); render();
+  }
+  function onFiles(list) {
+    if (!ui.modal || ui.modal.type !== 'upload') return;
+    let pending = 0; const bad = [];
+    for (const f of list) {
+      if (/\.(txt|md|csv|tex)$/i.test(f.name) || (f.type || '').startsWith('text/')) {
+        pending++;
+        const r = new FileReader();
+        r.onload = () => { ui.modal.text = (ui.modal.text ? ui.modal.text + '\n\n' : '') + String(r.result || ''); if (!--pending) renderModal(); };
+        r.onerror = () => { if (!--pending) renderModal(); };
+        r.readAsText(f);
+      } else bad.push(f.name);
+    }
+    ui.modal.error = bad.length ? 'Skipped (paste the text instead): ' + bad.join(', ') : '';
+    if (!pending) renderModal();
   }
   const KINDS = [['math', 'Math'], ['text', 'Text'], ['choice', 'Multiple choice']];
   const MATH_CHECKS = [['equiv', 'exact / equivalent'], ['numeric', 'decimal within tolerance'], ['form', 'specific form required']];
@@ -698,6 +779,7 @@
       case 'q-keep': { keepGenerated(); break; }
       case 'q-close': { const s2 = D.loadStudy(); const tb = curTab(s2); if (tb) { tb.activeQ = null; D.saveStudy(s2); render(); } break; }
       case 'q-add': { openModal({ id: null, draft: blankDraft(), error: '' }); break; }
+      case 'up-open': { openModal({ type: 'upload', text: '', busy: false, error: '' }); break; }
       case 'q-edit': { const q = tab && tab.questions.find((x) => x.id === id); if (q) openModal({ id: q.id, draft: draftFromQ(q), error: '' }); break; }
       case 'q-del': {
         askConfirm('Delete this question from the bank? This cannot be undone.', () => {
@@ -748,15 +830,29 @@
       case 'p-del': { readDraftFromDOM(ui.modal); ui.modal.draft.parts.splice(i, 1); renderModal(); break; }
       case 'opt-add': { readDraftFromDOM(ui.modal); const p = ui.modal.draft.parts[i]; (p.options ||= []).push({ text: '' }); renderModal(); break; }
       case 'm-save': saveQuestion(); break;
+      case 'up-pick': { const inp = overlay.querySelector('#st-file-input'); if (inp) inp.click(); break; }
+      case 'up-extract': enqueueExtract(); break;
+      case 'rv-import': importReviewed(); break;
       default: break;
     }
   }
   function onModalInput(e) {
     const m = ui.modal; if (!m) return;
+    if (e.target.id === 'st-file-input' && e.target.files && e.target.files.length) { onFiles([...e.target.files]); e.target.value = ''; return; }
     const stf = e.target.dataset.stf; const i = e.target.dataset.i != null ? Number(e.target.dataset.i) : null;
     if (stf === 'kind') { readDraftFromDOM(m); m.draft.parts[i].kind = e.target.value; if (e.target.value === 'choice' && !(m.draft.parts[i].options || []).length) m.draft.parts[i].options = [{ text: '' }, { text: '' }]; renderModal(); return; }
     if (stf === 'check') { readDraftFromDOM(m); m.draft.parts[i].check = e.target.value; renderModal(); return; }
-    // other fields are read on save / on structural change
+    // upload paste box — keep the draft text without re-rendering (would drop the caret)
+    if (stf === 'uptext') { m.text = e.target.value; return; }
+    // review checkbox — toggle selection and update the import count in place
+    if (e.target.dataset.stRev != null) {
+      const n = Number(e.target.dataset.stRev);
+      if (e.target.checked) m.chosen.add(n); else m.chosen.delete(n);
+      const btn = overlay.querySelector('[data-st="rv-import"]');
+      if (btn) btn.textContent = 'Import ' + m.chosen.size + ' selected';
+      return;
+    }
+    // other question-editor fields are read on save / on structural change
   }
 
   /* ───────────── document-level key handling ───────────── */

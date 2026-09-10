@@ -1813,7 +1813,7 @@ window.StudyAI = {
   configured() { return !!window.__bridgeSend; },
   setTool(toolId) {
     const base = 'agent:' + STUDY_AGENT + ':bridge:' + String(toolId || 't-study');
-    studyKeys = { tutor: base, judge: base + '-judge' };
+    studyKeys = { tutor: base, judge: base + '-judge', extract: base + '-extract' };
   },
   chat(prompt) { return studyDoTurn(studyKeys.tutor, String(prompt || '')); },
   async judge(items) {
@@ -1826,6 +1826,20 @@ window.StudyAI = {
     const obj = studyParseJSON(reply);
     if (!obj || !Array.isArray(obj.verdicts)) throw new Error('judge returned no usable verdicts');
     return { verdicts: obj.verdicts };
+  },
+  // Pasted / uploaded TEXT -> practice questions. Files are read to text in the
+  // page (the native send carries no attachments, so PDFs/images can't be sent
+  // — the UI says so and takes their pasted text instead).
+  async extract(text) {
+    const prompt = 'From the study material below, extract practice questions with their answers. '
+      + 'Reply with ONLY a fenced json block, no prose, in exactly this shape:\n'
+      + '```json\n{"questions":[{"category":"topic","intro":"the question stem / shared setup","parts":[{"prompt":"","kind":"math","answer":"LaTeX without $ delimiters","check":"equiv"}]}]}\n```\n'
+      + 'kind is "math" | "text" | "choice"; for a choice part add "options":["a","b",...] and set answer to the correct option INDEX. Put math in $…$ inside prose. Skip anything with no answer. Material:\n\n'
+      + String(text || '');
+    const reply = await studyDoTurn(studyKeys.extract, prompt);
+    const obj = studyParseJSON(reply);
+    if (!obj || !Array.isArray(obj.questions)) throw new Error('the tutor returned no usable questions');
+    return { questions: obj.questions };
   },
 };
 

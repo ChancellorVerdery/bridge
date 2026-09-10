@@ -1769,7 +1769,11 @@ body {
    ok/bad token. */
 
 .st-root { display: flex; min-height: 0; flex: 1; }
-.st { display: flex; flex-direction: column; min-height: 0; flex: 1; width: 100%; }
+/* NB: the wrapper is `.stu`, NOT `.st` — `.st` is already the topbar status
+   badge (border-radius:999px + border + align-items:center + uppercase), and
+   reusing it drew a giant stadium outline behind the study view, centered the
+   tabs, and uppercased the tutor text. Distinct class, no collision. */
+.stu { display: flex; flex-direction: column; min-height: 0; flex: 1; width: 100%; }
 .st-view { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 2px 24px; }
 
 /* course tabs — the SAME folder-tab format as the app's .page-tabs, left
@@ -1912,3 +1916,10 @@ textarea.st-field { resize: vertical; line-height: 1.5; }
 .st-tol { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; }
 .st-choice-edit { display: flex; flex-direction: column; gap: 6px; }
 .st-choice-edit__row { display: flex; align-items: center; gap: 8px; }
+
+/* upload material → review extracted questions */
+.st-uprow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.st-revlist { display: flex; flex-direction: column; gap: 8px; max-height: 48vh; overflow-y: auto; }
+.st-rev { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line-2); border-radius: 9px; padding: 9px 11px; cursor: pointer; }
+.st-rev:hover { border-color: rgba(var(--brass-rgb), 0.4); }
+.st-rev__body { display: flex; flex-direction: column; gap: 5px; min-width: 0; flex: 1; }

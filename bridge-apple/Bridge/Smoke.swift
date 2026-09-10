@@ -158,6 +158,33 @@ enum Smoke {
         """)) as? String ?? "nil"
         check("study store seeds from + mirrors to the native bridge", studyPersist == "ok", studyPersist)
 
+        // ---- the study wrapper is .stu (no .st badge collision) + upload flow -
+        // Bare .st is the topbar status badge (999px stadium border + centered +
+        // uppercase); the study wrapper must NOT reuse it. Also drive Question
+        // bank → Upload material → confirm the extract modal + file input render.
+        let studyUI = (try? await web.evaluateJavaScript("""
+          (function(){
+            var KEY="bridge.study.v1"; var saved=localStorage.getItem(KEY);
+            try {
+              localStorage.setItem(KEY, JSON.stringify({tabs:[{id:"t1",name:"Calc"}],active:"t1"}));
+              var d=document.createElement("div"); document.body.appendChild(d);
+              window.StudyUI.attach(d,{toolId:"t-study"});
+              var wrapperOk = !!d.querySelector(".stu");
+              var noBadge = !d.querySelector(".st");   // .st-* tokens don't match ".st"
+              var bank=[].slice.call(d.querySelectorAll("[data-st='tool']")).filter(function(b){return b.dataset.tool==="bank";})[0];
+              if(bank) bank.click();
+              var up=d.querySelector("[data-st='up-open']"); if(up) up.click();
+              var modalOk = !!document.querySelector(".st-overlay [data-st='up-extract']") && !!document.querySelector(".st-overlay #st-file-input");
+              d.remove();
+              return (wrapperOk && noBadge && modalOk) ? "ok" : ("wrapper="+wrapperOk+" noBadge="+noBadge+" modal="+modalOk);
+            } finally {
+              document.querySelectorAll(".st-overlay").forEach(function(o){o.remove();});
+              if (saved===null) localStorage.removeItem(KEY); else localStorage.setItem(KEY, saved);
+            }
+          })()
+        """)) as? String ?? "nil"
+        check("study wrapper avoids the .st badge collision + upload modal opens", studyUI == "ok", studyUI)
+
         // ---- a request id is an idempotency key, so it must survive a relaunch --
         //
         // Swift passes this id to the gateway verbatim as chat.send's
